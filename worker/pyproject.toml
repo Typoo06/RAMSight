@@ -1,0 +1,19 @@
+[project]
+name = "memory-malware-triage-worker"
+version = "0.1.0"
+description = "Celery worker for the Memory Malware Triage Platform"
+requires-python = ">=3.11"
+dependencies = [
+  "celery",
+  "redis",
+  "sqlalchemy",
+  "psycopg[binary]",
+  "pydantic",
+  "pydantic-settings",
+  "minio",
+  "yara-python",
+  "volatility3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests/worker", "../tests/detection"]
