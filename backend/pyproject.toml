@@ -1,0 +1,19 @@
+[project]
+name = "memory-malware-triage-backend"
+version = "0.1.0"
+description = "FastAPI backend for the Memory Malware Triage Platform"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "sqlalchemy",
+  "psycopg[binary]",
+  "pydantic",
+  "pydantic-settings",
+  "minio",
+  "celery",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests/backend"]
+
