@@ -1,0 +1,4 @@
+Do not commit memory dumps or real evidence files to this directory.
+
+Use ignored local storage, MinIO, or another approved evidence store.
+
