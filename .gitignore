@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.local
+
+# Node
+node_modules/
+dist/
+build/
+
+# Docker / local data
+docker-data/
+postgres-data/
+redis-data/
+minio-data/
+
+# Evidence / memory dumps
+*.raw
+*.mem
+*.vmem
+*.dmp
+*.dump
+*.lime
+sample-data/memory-dumps/*
+!sample-data/memory-dumps/.gitkeep
+!sample-data/memory-dumps/DO_NOT_COMMIT_LARGE_FILES.txt
+
+# Outputs
+outputs/
+tmp/
+temp/
+reports/examples/generated/
+volatility-outputs/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Logs
+*.log
+logs/
