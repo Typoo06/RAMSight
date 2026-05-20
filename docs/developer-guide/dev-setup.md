@@ -44,6 +44,20 @@ To validate Compose syntax without starting services:
 docker compose -f docker-compose.dev.yml config
 ```
 
+## Database Migrations
+
+Alembic configuration lives under `backend/`. Run migrations from inside the backend container so the service hostname `postgres` resolves correctly:
+
+```powershell
+docker compose -f docker-compose.dev.yml exec backend alembic upgrade head
+```
+
+To inspect the current revision:
+
+```powershell
+docker compose -f docker-compose.dev.yml exec backend alembic current
+```
+
 ## Safety Notes
 
 - Do not commit memory dumps or real evidence files.

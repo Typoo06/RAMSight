@@ -20,9 +20,11 @@ services:
       MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS:-reports}
       MINIO_BUCKET_RAW_OUTPUTS: ${MINIO_BUCKET_RAW_OUTPUTS:-raw-outputs}
       MINIO_SECURE: ${MINIO_SECURE:-false}
+      PYTHONPATH: /app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
+      - ./tests:/tests
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

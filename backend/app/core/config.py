@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://memory_triage:change-me@postgres:5432/memory_triage",
         alias="DATABASE_URL",
     )
+    alembic_database_url: str | None = Field(default=None, alias="ALEMBIC_DATABASE_URL")
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
     celery_broker_url: str = Field(default="redis://redis:6379/0", alias="CELERY_BROKER_URL")
     celery_result_backend: str = Field(default="redis://redis:6379/1", alias="CELERY_RESULT_BACKEND")
