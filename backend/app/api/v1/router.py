@@ -2,7 +2,11 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import health
+from app.api.v1.endpoints import analysis_jobs, cases, evidences, iocs, reports
 
 api_router = APIRouter()
-api_router.include_router(health.router, tags=["health"])
+api_router.include_router(cases.router, prefix="/cases", tags=["cases"])
+api_router.include_router(evidences.router, prefix="/evidences", tags=["evidences"])
+api_router.include_router(analysis_jobs.router, prefix="/analysis-jobs", tags=["analysis-jobs"])
+api_router.include_router(iocs.router, prefix="/iocs", tags=["iocs"])
+api_router.include_router(reports.router, prefix="/reports", tags=["reports"])

@@ -1,12 +1,29 @@
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_PROGRESS_BAR=off
 
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    for attempt in 1 2 3 4 5; do \
+        pip install --upgrade pip setuptools wheel && break; \
+        if [ "$attempt" = "5" ]; then exit 1; fi; \
+        echo "pip tool upgrade failed on attempt ${attempt}; retrying..."; \
+        sleep 5; \
+    done
+RUN --mount=type=cache,target=/root/.cache/pip \
+    for attempt in 1 2 3 4 5; do \
+        pip install --prefer-binary -e . && break; \
+        if [ "$attempt" = "5" ]; then exit 1; fi; \
+        echo "editable install failed on attempt ${attempt}; retrying..."; \
+        sleep 5; \
+    done
 
 COPY app ./app
 

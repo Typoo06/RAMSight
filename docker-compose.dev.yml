@@ -118,7 +118,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-memory_triage}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     volumes:
-      - ./docker-data/postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -175,4 +175,5 @@ services:
 
 volumes:
   frontend-node-modules:
+  postgres-data:
   volatility-symbols:
