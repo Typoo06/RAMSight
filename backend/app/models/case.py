@@ -1,4 +1,4 @@
-"""Case model."""
+# Case model.
 
 from sqlalchemy import ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -7,7 +7,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin, UpdatedAt
 
 
 class Case(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Investigation case container."""
 
     __tablename__ = "cases"
 

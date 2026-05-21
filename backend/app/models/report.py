@@ -1,4 +1,4 @@
-"""Report model."""
+# Report model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.enums import OSFamily, ReportFormat, ReportType
 
 
 class Report(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Generated report metadata."""
 
     __tablename__ = "reports"
 

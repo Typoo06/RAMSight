@@ -1,4 +1,4 @@
-"""Indicator of compromise model."""
+# Indicator of compromise model.
 
 from sqlalchemy import ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,7 +8,6 @@ from app.models.enums import OSFamily
 
 
 class IOC(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Extracted indicator of compromise."""
 
     __tablename__ = "iocs"
 

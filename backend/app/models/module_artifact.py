@@ -1,4 +1,4 @@
-"""Module artifact model."""
+# Module artifact model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 
 
 class ModuleArtifact(UUIDPrimaryKeyMixin, ArtifactLinkMixin, CreatedAtMixin, Base):
-    """Loaded module, library, or kernel module artifact."""
 
     __tablename__ = "module_artifacts"
 

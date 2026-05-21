@@ -1,4 +1,4 @@
-"""Risk finding response schemas."""
+# Risk finding response schemas.
 
 from datetime import datetime
 from uuid import UUID

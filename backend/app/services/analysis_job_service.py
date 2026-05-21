@@ -1,4 +1,4 @@
-"""Analysis job service functions."""
+# Analysis job service functions.
 
 from uuid import UUID
 
@@ -13,7 +13,6 @@ from app.services.job_dispatcher import AnalysisJobDispatcher
 
 
 def create_analysis_job(db: Session, data: AnalysisJobCreate, dispatcher: AnalysisJobDispatcher) -> AnalysisJob:
-    """Create a queued analysis job and invoke the dispatcher stub."""
     case = db.get(Case, data.case_id)
     if case is None:
         raise NotFoundError("case not found")
@@ -44,7 +43,6 @@ def create_analysis_job(db: Session, data: AnalysisJobCreate, dispatcher: Analys
 
 
 def list_analysis_jobs(db: Session, case_id: UUID | None = None, limit: int = 100, offset: int = 0) -> list[AnalysisJob]:
-    """List analysis jobs."""
     statement = select(AnalysisJob).order_by(AnalysisJob.created_at.desc()).offset(offset).limit(limit)
     if case_id is not None:
         statement = statement.where(AnalysisJob.case_id == case_id)
@@ -52,7 +50,6 @@ def list_analysis_jobs(db: Session, case_id: UUID | None = None, limit: int = 10
 
 
 def get_analysis_job(db: Session, job_id: UUID) -> AnalysisJob:
-    """Return one analysis job."""
     job = db.get(AnalysisJob, job_id)
     if job is None:
         raise NotFoundError("analysis job not found")

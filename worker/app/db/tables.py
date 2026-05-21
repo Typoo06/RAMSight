@@ -1,0 +1,76 @@
+# Minimal SQLAlchemy Core tables needed by the worker skeleton.
+
+from sqlalchemy import BigInteger, Column, DateTime, Integer, JSON, MetaData, String, Table, Text, Uuid
+
+metadata = MetaData()
+
+analysis_jobs = Table(
+    "analysis_jobs",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("case_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("status", String(50), nullable=False),
+    Column("os_family", String(20), nullable=False),
+    Column("os_version", String(255)),
+    Column("architecture", String(100)),
+    Column("kernel_version", String(255)),
+    Column("symbol_table", String(255)),
+    Column("plugin_profile", String(100)),
+    Column("requested_plugins", JSON),
+    Column("error_message", Text),
+    Column("duration_ms", Integer),
+    Column("started_at", DateTime(timezone=True)),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+evidences = Table(
+    "evidences",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("case_id", Uuid(), nullable=False),
+    Column("source_type", String(50), nullable=False),
+    Column("original_filename", String(255), nullable=False),
+    Column("size_bytes", BigInteger),
+    Column("md5", String(32)),
+    Column("sha256", String(64)),
+    Column("storage_bucket", String(255)),
+    Column("storage_key", String(1024)),
+    Column("local_path", String(1024)),
+    Column("os_family", String(20), nullable=False),
+    Column("os_version", String(255)),
+    Column("architecture", String(100)),
+    Column("kernel_version", String(255)),
+    Column("symbol_table", String(255)),
+    Column("acquisition_tool", String(255)),
+    Column("acquisition_time", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+plugin_results = Table(
+    "plugin_results",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("os_family", String(20), nullable=False),
+    Column("plugin_profile", String(100)),
+    Column("plugin_name", String(255), nullable=False),
+    Column("source_plugin", String(255), nullable=False),
+    Column("status", String(50), nullable=False),
+    Column("raw_output_bucket", String(255)),
+    Column("raw_output_key", String(1024)),
+    Column("parsed_output_bucket", String(255)),
+    Column("parsed_output_key", String(1024)),
+    Column("parsed_record_count", Integer),
+    Column("error_message", Text),
+    Column("duration_ms", Integer),
+    Column("extra_data", JSON),
+    Column("started_at", DateTime(timezone=True)),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)

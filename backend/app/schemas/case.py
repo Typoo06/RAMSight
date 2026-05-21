@@ -1,4 +1,4 @@
-"""Case request and response schemas."""
+# Case request and response schemas.
 
 from datetime import datetime
 from uuid import UUID

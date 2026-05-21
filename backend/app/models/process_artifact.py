@@ -1,4 +1,4 @@
-"""Process artifact model."""
+# Process artifact model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 
 
 class ProcessArtifact(UUIDPrimaryKeyMixin, ArtifactLinkMixin, CreatedAtMixin, Base):
-    """Cross-platform process artifact."""
 
     __tablename__ = "process_artifacts"
 

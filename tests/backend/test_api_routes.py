@@ -1,4 +1,4 @@
-"""Route registration tests for the backend API scaffold."""
+# Route registration tests for the backend API scaffold.
 
 from app.main import app
 

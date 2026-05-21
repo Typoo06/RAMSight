@@ -1,4 +1,4 @@
-"""Command artifact model."""
+# Command artifact model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 
 
 class CommandArtifact(UUIDPrimaryKeyMixin, ArtifactLinkMixin, CreatedAtMixin, Base):
-    """Command-line or shell-history artifact."""
 
     __tablename__ = "command_artifacts"
 

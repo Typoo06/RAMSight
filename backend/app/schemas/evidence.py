@@ -1,4 +1,4 @@
-"""Evidence request and response schemas."""
+# Evidence request and response schemas.
 
 from datetime import datetime
 from uuid import UUID

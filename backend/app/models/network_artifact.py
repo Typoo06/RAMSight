@@ -1,4 +1,4 @@
-"""Network artifact model."""
+# Network artifact model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 
 
 class NetworkArtifact(UUIDPrimaryKeyMixin, ArtifactLinkMixin, CreatedAtMixin, Base):
-    """Cross-platform network artifact."""
 
     __tablename__ = "network_artifacts"
 

@@ -1,2 +1,2 @@
-"""Backend detection package."""
+# Backend detection package.
 

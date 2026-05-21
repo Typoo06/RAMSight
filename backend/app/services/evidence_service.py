@@ -1,4 +1,4 @@
-"""Evidence service functions."""
+# Evidence service functions.
 
 from pathlib import Path
 import shutil
@@ -38,7 +38,6 @@ def upload_evidence(
     acquisition_tool: str | None = None,
     acquisition_time=None,
 ) -> Evidence:
-    """Store uploaded evidence in object storage and persist metadata only."""
     case = db.get(Case, case_id)
     if case is None:
         raise NotFoundError("case not found")
@@ -83,7 +82,6 @@ def upload_evidence(
 
 
 def register_evidence(db: Session, data: EvidenceRegister) -> Evidence:
-    """Register metadata for existing MinIO object or ignored local path."""
     case = db.get(Case, data.case_id)
     if case is None:
         raise NotFoundError("case not found")
@@ -102,7 +100,6 @@ def register_evidence(db: Session, data: EvidenceRegister) -> Evidence:
 
 
 def list_evidences(db: Session, case_id: UUID | None = None, limit: int = 100, offset: int = 0) -> list[Evidence]:
-    """List evidence metadata."""
     statement = select(Evidence).order_by(Evidence.created_at.desc()).offset(offset).limit(limit)
     if case_id is not None:
         statement = statement.where(Evidence.case_id == case_id)
@@ -110,7 +107,6 @@ def list_evidences(db: Session, case_id: UUID | None = None, limit: int = 100, o
 
 
 def get_evidence(db: Session, evidence_id: UUID) -> Evidence:
-    """Return one evidence metadata record."""
     evidence = db.get(Evidence, evidence_id)
     if evidence is None:
         raise NotFoundError("evidence not found")

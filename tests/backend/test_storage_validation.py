@@ -1,4 +1,4 @@
-"""Tests for safe evidence validation."""
+# Tests for safe evidence validation.
 
 import pytest
 

@@ -1,4 +1,4 @@
-"""Database model package."""
+# Database model package.
 
 from app.models.analysis_job import AnalysisJob
 from app.models.analyst_note import AnalystNote

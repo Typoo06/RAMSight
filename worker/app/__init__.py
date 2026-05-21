@@ -1,2 +1,2 @@
-"""Worker application package."""
+# Worker application package.
 

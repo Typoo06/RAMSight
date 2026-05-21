@@ -1,4 +1,4 @@
-"""Import tests for SQLAlchemy models."""
+# Import tests for SQLAlchemy models.
 
 from app.models import (
     AnalysisJob,

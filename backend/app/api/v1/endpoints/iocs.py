@@ -1,4 +1,4 @@
-"""IOC endpoints."""
+# IOC endpoints.
 
 from uuid import UUID
 
@@ -20,5 +20,4 @@ def list_iocs(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List extracted IOCs by optional case/job filters."""
     return {"items": ioc_service.list_iocs(db, case_id=case_id, job_id=job_id, limit=limit, offset=offset)}

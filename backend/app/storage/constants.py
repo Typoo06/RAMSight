@@ -1,4 +1,4 @@
-"""Storage constants for evidence and generated analysis outputs."""
+# Storage constants for evidence and generated analysis outputs.
 
 ALLOWED_EVIDENCE_EXTENSIONS = frozenset({".raw", ".mem", ".vmem", ".dmp", ".lime"})
 DEFAULT_HASH_CHUNK_SIZE = 1024 * 1024

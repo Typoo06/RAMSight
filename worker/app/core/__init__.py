@@ -1,1 +1,1 @@
-"""Worker core package."""
+# Worker core package.

@@ -1,4 +1,4 @@
-"""User model."""
+# User model.
 
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -7,7 +7,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin, UpdatedAt
 
 
 class User(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Local analyst account."""
 
     __tablename__ = "users"
 

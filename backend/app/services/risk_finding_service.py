@@ -1,4 +1,4 @@
-"""Risk finding query service."""
+# Risk finding query service.
 
 from uuid import UUID
 
@@ -11,7 +11,6 @@ from app.models import AnalysisJob, RiskFinding
 def list_risk_findings(
     db: Session, case_id: UUID | None = None, job_id: UUID | None = None, limit: int = 100, offset: int = 0
 ) -> list[RiskFinding]:
-    """List risk findings by optional case/job filters."""
     statement = select(RiskFinding).order_by(RiskFinding.score.desc(), RiskFinding.created_at.desc())
     if case_id is not None:
         statement = statement.join(AnalysisJob, RiskFinding.analysis_job_id == AnalysisJob.id).where(

@@ -1,4 +1,4 @@
-"""Model metadata registration tests."""
+# Model metadata registration tests.
 
 from sqlalchemy import Uuid
 

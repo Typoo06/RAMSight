@@ -1,4 +1,4 @@
-"""Analysis job model."""
+# Analysis job model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.enums import AnalysisJobStatus, OSFamily
 
 
 class AnalysisJob(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Worker-backed memory analysis job."""
 
     __tablename__ = "analysis_jobs"
 

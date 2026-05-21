@@ -1,2 +1,2 @@
-"""Worker report generation package."""
+# Worker report generation package.
 

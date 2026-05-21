@@ -1,4 +1,4 @@
-"""Case service functions."""
+# Case service functions.
 
 from uuid import UUID
 
@@ -12,7 +12,6 @@ from app.services.errors import ConflictError, NotFoundError
 
 
 def create_case(db: Session, data: CaseCreate) -> Case:
-    """Create an investigation case."""
     existing = db.execute(select(Case).where(Case.case_code == data.case_code)).scalar_one_or_none()
     if existing is not None:
         raise ConflictError("case_code already exists")
@@ -30,12 +29,10 @@ def create_case(db: Session, data: CaseCreate) -> Case:
 
 
 def list_cases(db: Session, limit: int = 100, offset: int = 0) -> list[Case]:
-    """List cases with pagination."""
     return list(db.execute(select(Case).order_by(Case.created_at.desc()).offset(offset).limit(limit)).scalars())
 
 
 def get_case(db: Session, case_id: UUID) -> Case:
-    """Return one case by id."""
     case = db.get(Case, case_id)
     if case is None:
         raise NotFoundError("case not found")

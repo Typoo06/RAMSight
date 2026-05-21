@@ -1,4 +1,4 @@
-"""YARA match model."""
+# YARA match model.
 
 from sqlalchemy import ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -8,7 +8,6 @@ from app.models.enums import OSFamily
 
 
 class YaraMatch(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    """YARA match found during memory analysis."""
 
     __tablename__ = "yara_matches"
 

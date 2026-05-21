@@ -1,4 +1,4 @@
-"""Tests for object key conventions."""
+# Tests for object key conventions.
 
 from app.storage.keys import (
     evidence_object_key,

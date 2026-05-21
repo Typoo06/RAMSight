@@ -1,16 +1,22 @@
-"""Analysis job dispatch abstraction for future Celery integration."""
+# Analysis job dispatch abstraction for Celery integration.
 
 from uuid import UUID
 
+from celery import Celery
+
+from app.core.celery import celery_sender
+
+ANALYSIS_TASK_NAME = "app.tasks.analysis.run_analysis_job"
+
 
 class AnalysisJobDispatcher:
-    """No-op dispatcher stub for Task 6A."""
+
+    def __init__(self, celery_app: Celery | None = None) -> None:
+        self.celery_app = celery_app or celery_sender
 
     def dispatch(self, job_id: UUID) -> None:
-        """Dispatch an analysis job later when Task 6B wires Celery."""
-        return None
+        self.celery_app.send_task(ANALYSIS_TASK_NAME, args=[str(job_id)])
 
 
 def get_analysis_job_dispatcher() -> AnalysisJobDispatcher:
-    """Return the current analysis job dispatcher."""
     return AnalysisJobDispatcher()

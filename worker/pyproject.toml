@@ -11,6 +11,7 @@ dependencies = [
   "pydantic",
   "pydantic-settings",
   "minio",
+  "pytest",
   "yara-python",
   "volatility3",
 ]

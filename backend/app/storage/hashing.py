@@ -1,4 +1,4 @@
-"""Streaming file hashing helpers."""
+# Streaming file hashing helpers.
 
 from dataclasses import dataclass
 import hashlib
@@ -9,7 +9,6 @@ from app.storage.constants import DEFAULT_HASH_CHUNK_SIZE
 
 @dataclass(frozen=True)
 class FileHashResult:
-    """Hashes and byte size for a file."""
 
     md5: str
     sha256: str
@@ -17,7 +16,6 @@ class FileHashResult:
 
 
 def calculate_file_hashes(path: Path, chunk_size: int = DEFAULT_HASH_CHUNK_SIZE) -> FileHashResult:
-    """Calculate MD5, SHA256, and size while streaming file content."""
     md5_hash = hashlib.md5(usedforsecurity=False)
     sha256_hash = hashlib.sha256()
     size_bytes = 0

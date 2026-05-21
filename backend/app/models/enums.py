@@ -1,4 +1,4 @@
-"""String values used by OS-aware database models."""
+# String values used by OS-aware database models.
 
 from enum import StrEnum
 

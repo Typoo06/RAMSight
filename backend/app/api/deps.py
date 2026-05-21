@@ -1,4 +1,4 @@
-"""FastAPI dependency helpers."""
+# FastAPI dependency helpers.
 
 from collections.abc import Generator
 
@@ -8,7 +8,6 @@ from app.db.session import SessionLocal
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Yield a database session for request handlers."""
     db = SessionLocal()
     try:
         yield db

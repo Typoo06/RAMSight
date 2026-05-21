@@ -1,2 +1,2 @@
-"""IOC extraction package."""
+# IOC extraction package.
 

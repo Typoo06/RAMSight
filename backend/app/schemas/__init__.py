@@ -1,4 +1,4 @@
-"""Pydantic schema package."""
+# Pydantic schema package.
 
 from app.schemas.analysis_job import AnalysisJobCreate, AnalysisJobListResponse, AnalysisJobRead, AnalysisJobStatusRead
 from app.schemas.case import CaseCreate, CaseListResponse, CaseRead

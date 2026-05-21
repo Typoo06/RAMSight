@@ -1,4 +1,4 @@
-"""Case endpoints."""
+# Case endpoints.
 
 from uuid import UUID
 
@@ -15,7 +15,6 @@ router = APIRouter()
 
 @router.post("", response_model=CaseRead, status_code=status.HTTP_201_CREATED)
 def create_case(payload: CaseCreate, db: Session = Depends(get_db)):
-    """Create a case."""
     try:
         return case_service.create_case(db, payload)
     except ConflictError as exc:
@@ -28,13 +27,11 @@ def list_cases(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List cases."""
     return {"items": case_service.list_cases(db, limit=limit, offset=offset)}
 
 
 @router.get("/{case_id}", response_model=CaseRead)
 def get_case(case_id: UUID, db: Session = Depends(get_db)):
-    """Get one case."""
     try:
         return case_service.get_case(db, case_id)
     except NotFoundError as exc:

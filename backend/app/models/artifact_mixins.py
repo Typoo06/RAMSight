@@ -1,4 +1,4 @@
-"""Shared fields for OS-aware artifact models."""
+# Shared fields for OS-aware artifact models.
 
 from sqlalchemy import ForeignKey, JSON, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -7,7 +7,6 @@ from app.models.enums import OSFamily
 
 
 class ArtifactLinkMixin:
-    """Common links from parsed artifacts back to source evidence and plugin output."""
 
     analysis_job_id = mapped_column(Uuid, ForeignKey("analysis_jobs.id"), nullable=False, index=True)
     evidence_id = mapped_column(Uuid, ForeignKey("evidences.id"), nullable=False, index=True)

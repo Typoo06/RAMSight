@@ -1,2 +1,2 @@
-"""Worker detection package."""
+# Worker detection package.
 

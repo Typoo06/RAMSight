@@ -1,17 +1,17 @@
-"""Service-layer exceptions mapped by API handlers."""
+# Service-layer exceptions mapped by API handlers.
 
 
 class ServiceError(Exception):
-    """Base service exception."""
+    pass
 
 
 class NotFoundError(ServiceError):
-    """Raised when a requested entity does not exist."""
+    pass
 
 
 class ConflictError(ServiceError):
-    """Raised when a unique or state conflict occurs."""
+    pass
 
 
 class ValidationError(ServiceError):
-    """Raised when request data is invalid for the current workflow."""
+    pass

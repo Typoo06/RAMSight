@@ -1,4 +1,4 @@
-"""Storage integration package."""
+# Storage integration package.
 
 from app.storage.client import EvidenceUploadResult, ObjectStorageClient, StorageObject, get_storage_client
 from app.storage.hashing import FileHashResult, calculate_file_hashes

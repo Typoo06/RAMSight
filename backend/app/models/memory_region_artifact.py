@@ -1,4 +1,4 @@
-"""Memory region artifact model."""
+# Memory region artifact model.
 
 from sqlalchemy import Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -8,7 +8,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 
 
 class MemoryRegionArtifact(UUIDPrimaryKeyMixin, ArtifactLinkMixin, CreatedAtMixin, Base):
-    """Suspicious or notable memory region artifact."""
 
     __tablename__ = "memory_region_artifacts"
 

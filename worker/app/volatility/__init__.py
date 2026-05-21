@@ -1,2 +1,2 @@
-"""Volatility integration package."""
+# Volatility integration package.
 

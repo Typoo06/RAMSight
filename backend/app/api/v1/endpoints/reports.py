@@ -1,4 +1,4 @@
-"""Report metadata endpoints."""
+# Report metadata endpoints.
 
 from uuid import UUID
 
@@ -21,13 +21,11 @@ def list_reports(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List generated report metadata."""
     return {"items": report_service.list_reports(db, case_id=case_id, job_id=job_id, limit=limit, offset=offset)}
 
 
 @router.get("/{report_id}", response_model=ReportRead)
 def get_report(report_id: UUID, db: Session = Depends(get_db)):
-    """Get one report metadata record."""
     try:
         return report_service.get_report(db, report_id)
     except NotFoundError as exc:

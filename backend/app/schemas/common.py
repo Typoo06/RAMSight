@@ -1,4 +1,4 @@
-"""Shared API schemas and enum-like values."""
+# Shared API schemas and enum-like values.
 
 from enum import StrEnum
 from uuid import UUID
@@ -27,19 +27,16 @@ class AnalysisJobStatus(StrEnum):
 
 
 class OrmModel(BaseModel):
-    """Pydantic base model that can read SQLAlchemy objects."""
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ListResponse(BaseModel):
-    """Generic list wrapper used by MVP endpoints."""
 
     items: list
 
 
 class CaseJobQuery(BaseModel):
-    """Common optional case/job filters."""
 
     case_id: UUID | None = None
     job_id: UUID | None = None

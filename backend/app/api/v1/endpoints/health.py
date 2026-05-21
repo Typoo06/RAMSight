@@ -1,4 +1,4 @@
-"""Health endpoints."""
+# Health endpoints.
 
 from fastapi import APIRouter, Depends
 
@@ -9,5 +9,4 @@ router = APIRouter()
 
 @router.get("/health")
 def health_check(settings: Settings = Depends(get_settings)) -> dict[str, str]:
-    """Return basic service health."""
     return {"status": "ok", "environment": settings.app_env}

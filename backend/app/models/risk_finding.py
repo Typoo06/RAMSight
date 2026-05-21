@@ -1,4 +1,4 @@
-"""Risk finding model."""
+# Risk finding model.
 
 from sqlalchemy import ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,7 +8,6 @@ from app.models.enums import OSFamily, OSScope, Severity
 
 
 class RiskFinding(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Detection or risk-scoring result."""
 
     __tablename__ = "risk_findings"
 

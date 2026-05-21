@@ -1,4 +1,4 @@
-"""MVP case API tests."""
+# MVP case API tests.
 
 import pytest
 from fastapi.testclient import TestClient

@@ -1,4 +1,4 @@
-"""Evidence model."""
+# Evidence model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.enums import EvidenceSourceType, OSFamily
 
 
 class Evidence(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Memory dump metadata; large files live in object storage."""
 
     __tablename__ = "evidences"
 

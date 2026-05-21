@@ -90,10 +90,12 @@ services:
       MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS:-reports}
       MINIO_BUCKET_RAW_OUTPUTS: ${MINIO_BUCKET_RAW_OUTPUTS:-raw-outputs}
       MINIO_SECURE: ${MINIO_SECURE:-false}
+      PYTHONPATH: /app
       VOLATILITY_SYMBOL_PATH: ${VOLATILITY_SYMBOL_PATH:-/opt/volatility/symbols}
     command: celery -A app.celery_app.celery_app worker --loglevel=info
     volumes:
       - ./worker:/app
+      - ./tests:/tests
       - volatility-symbols:${VOLATILITY_SYMBOL_PATH:-/opt/volatility/symbols}
     depends_on:
       postgres:

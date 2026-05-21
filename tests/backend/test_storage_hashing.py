@@ -1,4 +1,4 @@
-"""Tests for streaming hash calculation."""
+# Tests for streaming hash calculation.
 
 import hashlib
 

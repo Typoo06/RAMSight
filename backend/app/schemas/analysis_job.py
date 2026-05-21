@@ -1,4 +1,4 @@
-"""Analysis job request and response schemas."""
+# Analysis job request and response schemas.
 
 from datetime import datetime
 from uuid import UUID

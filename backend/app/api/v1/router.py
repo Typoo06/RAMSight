@@ -1,4 +1,4 @@
-"""API v1 router registration."""
+# API v1 router registration.
 
 from fastapi import APIRouter
 

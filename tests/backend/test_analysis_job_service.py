@@ -1,4 +1,4 @@
-"""Analysis job service tests."""
+# Analysis job service tests.
 
 import pytest
 from sqlalchemy import create_engine

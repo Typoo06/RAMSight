@@ -1,4 +1,4 @@
-"""Celery application entry point."""
+# Celery application entry point.
 
 from celery import Celery
 
@@ -12,4 +12,11 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
 )
 
-celery_app.conf.update(task_serializer="json", result_serializer="json", accept_content=["json"])
+celery_app.conf.update(
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    imports=("app.tasks.analysis",),
+    task_track_started=True,
+    worker_prefetch_multiplier=1,
+)

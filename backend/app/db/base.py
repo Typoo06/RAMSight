@@ -1,4 +1,4 @@
-"""SQLAlchemy declarative base and model metadata imports."""
+# SQLAlchemy declarative base and model metadata imports.
 
 from app.models import Base
 

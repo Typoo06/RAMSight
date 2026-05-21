@@ -1,2 +1,2 @@
-"""Volatility parser package."""
+# Volatility parser package.
 

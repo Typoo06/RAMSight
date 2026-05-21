@@ -1,4 +1,4 @@
-"""Analyst note model."""
+# Analyst note model.
 
 from sqlalchemy import ForeignKey, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -7,7 +7,6 @@ from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin, UpdatedAt
 
 
 class AnalystNote(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Analyst-authored note attached to case or analysis context."""
 
     __tablename__ = "analyst_notes"
 

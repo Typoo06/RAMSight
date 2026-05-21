@@ -1,4 +1,4 @@
-"""Service import smoke tests."""
+# Service import smoke tests.
 
 from app.services import analysis_job_service, case_service, evidence_service, ioc_service, report_service, risk_finding_service
 from app.services.job_dispatcher import AnalysisJobDispatcher

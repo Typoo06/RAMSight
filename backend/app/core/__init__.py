@@ -1,2 +1,2 @@
-"""Core configuration package."""
+# Core configuration package.
 

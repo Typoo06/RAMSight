@@ -1,4 +1,4 @@
-"""Alembic migration import smoke test."""
+# Alembic migration import smoke test.
 
 import importlib.util
 from pathlib import Path

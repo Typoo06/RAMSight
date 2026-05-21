@@ -1,4 +1,4 @@
-"""Risk finding endpoints."""
+# Risk finding endpoints.
 
 from uuid import UUID
 
@@ -20,7 +20,6 @@ def list_risk_findings(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List risk findings by optional case/job filters."""
     return {
         "items": risk_finding_service.list_risk_findings(
             db, case_id=case_id, job_id=job_id, limit=limit, offset=offset

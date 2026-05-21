@@ -1,4 +1,4 @@
-"""IOC response schemas."""
+# IOC response schemas.
 
 from datetime import datetime
 from uuid import UUID

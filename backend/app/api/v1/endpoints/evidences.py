@@ -1,4 +1,4 @@
-"""Evidence endpoints."""
+# Evidence endpoints.
 
 from datetime import datetime
 from uuid import UUID
@@ -30,7 +30,6 @@ def upload_evidence(
     db: Session = Depends(get_db),
     storage_client: ObjectStorageClient = Depends(get_storage_client),
 ):
-    """Upload evidence to object storage and store metadata only."""
     try:
         return evidence_service.upload_evidence(
             db=db,
@@ -53,7 +52,6 @@ def upload_evidence(
 
 @router.post("/register", response_model=EvidenceRead, status_code=status.HTTP_201_CREATED)
 def register_evidence(payload: EvidenceRegister, db: Session = Depends(get_db)):
-    """Register existing evidence object/path metadata without uploading content."""
     try:
         return evidence_service.register_evidence(db, payload)
     except NotFoundError as exc:
@@ -69,13 +67,11 @@ def list_evidences(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List evidence metadata."""
     return {"items": evidence_service.list_evidences(db, case_id=case_id, limit=limit, offset=offset)}
 
 
 @router.get("/{evidence_id}", response_model=EvidenceRead)
 def get_evidence(evidence_id: UUID, db: Session = Depends(get_db)):
-    """Get one evidence metadata record."""
     try:
         return evidence_service.get_evidence(db, evidence_id)
     except NotFoundError as exc:

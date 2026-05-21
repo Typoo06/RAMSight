@@ -1,4 +1,4 @@
-"""Volatility plugin result model."""
+# Volatility plugin result model.
 
 from datetime import datetime
 
@@ -10,7 +10,6 @@ from app.models.enums import OSFamily, PluginResultStatus
 
 
 class PluginResult(UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, Base):
-    """Execution record for one analysis plugin."""
 
     __tablename__ = "plugin_results"
 

@@ -1,4 +1,4 @@
-"""Analysis job endpoints."""
+# Analysis job endpoints.
 
 from uuid import UUID
 
@@ -20,7 +20,6 @@ def create_analysis_job(
     db: Session = Depends(get_db),
     dispatcher: AnalysisJobDispatcher = Depends(get_analysis_job_dispatcher),
 ):
-    """Create a queued analysis job without running analysis in the API process."""
     try:
         return analysis_job_service.create_analysis_job(db, payload, dispatcher)
     except NotFoundError as exc:
@@ -36,13 +35,11 @@ def list_analysis_jobs(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List analysis jobs."""
     return {"items": analysis_job_service.list_analysis_jobs(db, case_id=case_id, limit=limit, offset=offset)}
 
 
 @router.get("/{job_id}", response_model=AnalysisJobRead)
 def get_analysis_job(job_id: UUID, db: Session = Depends(get_db)):
-    """Get one analysis job."""
     try:
         return analysis_job_service.get_analysis_job(db, job_id)
     except NotFoundError as exc:
@@ -51,7 +48,6 @@ def get_analysis_job(job_id: UUID, db: Session = Depends(get_db)):
 
 @router.get("/{job_id}/status", response_model=AnalysisJobStatusRead)
 def get_analysis_job_status(job_id: UUID, db: Session = Depends(get_db)):
-    """Get analysis job status."""
     try:
         return analysis_job_service.get_analysis_job(db, job_id)
     except NotFoundError as exc:
