@@ -226,3 +226,22 @@ risk_findings = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
+
+iocs = Table(
+    "iocs",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("risk_finding_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("ioc_type", String(100), nullable=False),
+    Column("value", String(1024), nullable=False),
+    Column("normalized_value", String(1024)),
+    Column("context", Text),
+    Column("confidence", Integer),
+    Column("extra_data", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)

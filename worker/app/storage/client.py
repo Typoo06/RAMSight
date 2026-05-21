@@ -6,7 +6,7 @@ from pathlib import Path
 from minio import Minio
 
 from app.core.config import Settings, get_settings
-from app.storage.keys import parsed_plugin_output_key, raw_plugin_output_key
+from app.storage.keys import ioc_export_key, parsed_plugin_output_key, raw_plugin_output_key
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,22 @@ class ObjectStorageClient:
             object_key,
             str(path),
             content_type="application/json",
+        )
+        return StorageObject(
+            bucket=self.raw_outputs_bucket,
+            key=object_key,
+            size_bytes=path.stat().st_size,
+            etag=result.etag,
+        )
+
+    def upload_ioc_export(self, case_id: object, job_id: object, filename: str, path: Path, content_type: str) -> StorageObject:
+        self.ensure_raw_outputs_bucket()
+        object_key = ioc_export_key(case_id, job_id, filename)
+        result = self.client.fput_object(
+            self.raw_outputs_bucket,
+            object_key,
+            str(path),
+            content_type=content_type,
         )
         return StorageObject(
             bucket=self.raw_outputs_bucket,

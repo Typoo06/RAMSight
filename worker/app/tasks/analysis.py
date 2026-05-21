@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 from pathlib import Path, PurePath
 from time import perf_counter
 from uuid import UUID, uuid4
@@ -14,6 +15,7 @@ from app.core.config import get_settings
 from app.db.session import engine
 from app.db.tables import analysis_jobs, evidences, plugin_results
 from app.detection.persistence import insert_detection_stage_error, run_detection_for_job
+from app.ioc.persistence import run_ioc_extraction_for_job
 from app.parsers.common import ParserError
 from app.parsers.persistence import (
     insert_artifact_batch,
@@ -30,6 +32,7 @@ from app.volatility.registry import select_plugins
 from app.volatility.runner import VolatilityRunResult, ensure_volatility_available, run_volatility_plugin
 
 ANALYSIS_TASK_NAME = "app.tasks.analysis.run_analysis_job"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -231,6 +234,8 @@ def run_analysis_job(job_id: str) -> dict:
             successful_plugins = 0
             plugin_result_ids = []
             detection_finding_count = 0
+            ioc_count = 0
+            ioc_export_keys = {}
 
             for plugin in selected_plugins:
                 plugin_started_at = utc_now()
@@ -303,6 +308,20 @@ def run_analysis_job(job_id: str) -> dict:
                     with engine.begin() as conn:
                         insert_detection_stage_error(conn, detection_context, short_error_message(exc))
 
+                ioc_context = {**detection_context, "case_id": context["case_id"]}
+                try:
+                    with engine.begin() as conn:
+                        ioc_result = run_ioc_extraction_for_job(conn, ioc_context, workspace, storage_client)
+                    ioc_count = ioc_result["inserted_count"]
+                    ioc_export_keys = {
+                        "json": ioc_result["json_export_key"],
+                        "csv": ioc_result["csv_export_key"],
+                    }
+                except Exception as exc:  # noqa: BLE001 - IOC extraction must not fail an otherwise useful job.
+                    error_message = short_error_message(exc)
+                    LOGGER.warning("IOC extraction failed for job %s: %s", parsed_job_id, error_message)
+                    ioc_export_keys = {"error": error_message}
+
         completed_at = utc_now()
         elapsed_ms = duration_ms_since(task_started)
         with engine.begin() as conn:
@@ -319,6 +338,8 @@ def run_analysis_job(job_id: str) -> dict:
             "plugin_result_ids": [str(plugin_result_id) for plugin_result_id in plugin_result_ids],
             "successful_plugins": successful_plugins,
             "detection_findings": detection_finding_count,
+            "iocs": ioc_count,
+            "ioc_exports": ioc_export_keys,
         }
     except Exception as exc:  # noqa: BLE001 - task boundary stores a safe failure summary.
         completed_at = utc_now()

@@ -1,0 +1,461 @@
+# IOC extraction from normalized artifacts and risk findings.
+
+from __future__ import annotations
+
+import ipaddress
+import re
+from collections import defaultdict
+from uuid import UUID
+
+from app.detection.engine import command_has_encoded_powershell
+from app.ioc.dedup import deduplicate_iocs, normalize_ioc_value, normalize_path
+from app.ioc.types import (
+    IOC_COMMAND_LINE,
+    IOC_FILE_PATH,
+    IOC_IP_ADDRESS,
+    IOC_MEMORY_REGION,
+    IOC_MODULE_PATH,
+    IOC_NETWORK_ENDPOINT,
+    IOC_PID,
+    IOC_PLUGIN_REFERENCE,
+    IOC_PROCESS_NAME,
+    IOC_YARA_RULE,
+    IOCRecordDraft,
+)
+
+PROCESS_TABLE = "process_artifacts"
+NETWORK_TABLE = "network_artifacts"
+MODULE_TABLE = "module_artifacts"
+MEMORY_REGION_TABLE = "memory_region_artifacts"
+COMMAND_TABLE = "command_artifacts"
+YARA_TABLE = "yara_matches"
+
+SUSPICIOUS_COMMAND_KEYWORDS = {
+    "invoke-expression",
+    "downloadstring",
+    "frombase64string",
+    "mimikatz",
+    "rundll32",
+    "certutil",
+    "powershell -enc",
+    "powershell.exe -enc",
+    "curl ",
+    "wget ",
+}
+USER_WRITABLE_PATH_FRAGMENTS = {
+    "/temp/",
+    "/tmp/",
+    "/var/tmp/",
+    "/dev/shm/",
+    "/appdata/",
+    "/users/public/",
+    "/downloads/",
+    "/home/",
+}
+WHITESPACE_RE = re.compile(r"\s+")
+
+
+def extract_iocs(artifacts: dict[str, list[dict]], risk_findings: list[dict], context: dict) -> list[IOCRecordDraft]:
+    risk_index = index_risk_findings(risk_findings)
+    iocs: list[IOCRecordDraft] = []
+    iocs.extend(extract_network_iocs(artifacts.get(NETWORK_TABLE, []), risk_index, context))
+    iocs.extend(extract_command_iocs(artifacts.get(COMMAND_TABLE, []), risk_index, context))
+    iocs.extend(extract_module_iocs(artifacts.get(MODULE_TABLE, []), risk_index, context))
+    iocs.extend(extract_process_iocs(artifacts.get(PROCESS_TABLE, []), risk_index, context))
+    iocs.extend(extract_yara_iocs(artifacts.get(YARA_TABLE, []), context))
+    iocs.extend(extract_memory_region_iocs(artifacts.get(MEMORY_REGION_TABLE, []), risk_index, context))
+    iocs.extend(extract_plugin_reference_iocs(risk_findings, context))
+    return deduplicate_iocs(iocs)
+
+
+def index_risk_findings(risk_findings: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    indexed: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for finding in risk_findings:
+        if finding.get("category") == "process_risk_summary":
+            continue
+        artifact_type = finding.get("artifact_type")
+        artifact_id = finding.get("artifact_id")
+        if artifact_type and artifact_id:
+            indexed[(str(artifact_type), str(artifact_id))].append(finding)
+    return indexed
+
+
+def linked_findings(risk_index: dict[tuple[str, str], list[dict]], table_name: str, artifact: dict) -> list[dict]:
+    artifact_id = artifact.get("id")
+    if artifact_id is None:
+        return []
+    return risk_index.get((table_name, str(artifact_id)), [])
+
+
+def is_public_ip(value: str | None) -> bool:
+    address = parse_ip(value)
+    if address is None:
+        return False
+    return not (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    )
+
+
+def parse_ip(value: str | None):
+    if not value:
+        return None
+    try:
+        return ipaddress.ip_address(str(value).strip().strip("[]"))
+    except ValueError:
+        return None
+
+
+def confidence_for_severity(severity: str | None, default: int = 60) -> int:
+    return {"critical": 95, "high": 85, "medium": 65, "low": 45}.get((severity or "").lower(), default)
+
+
+def severity_from_findings(findings: list[dict], default: str = "medium") -> str:
+    order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    severities = [str(finding.get("severity") or default).lower() for finding in findings]
+    return max(severities or [default], key=lambda severity: order.get(severity, 0))
+
+
+def make_ioc(
+    context: dict,
+    ioc_type: str,
+    value: object,
+    source_plugin: str | None,
+    confidence: int,
+    text_context: str,
+    extra_data: dict,
+    risk_finding_id: UUID | None = None,
+) -> IOCRecordDraft | None:
+    if value in (None, ""):
+        return None
+    value_text = str(value)
+    os_family = (context.get("os_family") or "unknown").lower()
+    return IOCRecordDraft(
+        analysis_job_id=context["analysis_job_id"],
+        evidence_id=context["evidence_id"],
+        risk_finding_id=risk_finding_id,
+        os_family=os_family,
+        source_plugin=source_plugin,
+        ioc_type=ioc_type,
+        value=value_text,
+        normalized_value=normalize_ioc_value(ioc_type, value_text, os_family),
+        context=text_context,
+        confidence=confidence,
+        extra_data=extra_data,
+    )
+
+
+def append_if_present(iocs: list[IOCRecordDraft], ioc: IOCRecordDraft | None) -> None:
+    if ioc is not None:
+        iocs.append(ioc)
+
+
+def first_finding_id(findings: list[dict]) -> UUID | None:
+    return findings[0].get("id") if findings else None
+
+
+def extract_network_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for row in rows:
+        findings = linked_findings(risk_index, NETWORK_TABLE, row)
+        remote_address = row.get("remote_address")
+        remote_port = row.get("remote_port")
+        public = is_public_ip(remote_address)
+        if not public and not findings:
+            continue
+        severity = severity_from_findings(findings, "medium" if public else "low")
+        confidence = confidence_for_severity(severity, 70 if public else 35)
+        if not public:
+            confidence = min(confidence, 40)
+        extra_data = network_extra(row, severity, "public remote address" if public else "linked non-public remote address")
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_IP_ADDRESS,
+                remote_address,
+                row.get("source_plugin"),
+                confidence,
+                extra_data["matched_reason"],
+                extra_data,
+                first_finding_id(findings),
+            ),
+        )
+        if remote_port is not None:
+            append_if_present(
+                iocs,
+                make_ioc(
+                    context,
+                    IOC_NETWORK_ENDPOINT,
+                    f"{remote_address}:{remote_port}",
+                    row.get("source_plugin"),
+                    confidence,
+                    extra_data["matched_reason"],
+                    extra_data,
+                    first_finding_id(findings),
+                ),
+            )
+    return iocs
+
+
+def network_extra(row: dict, severity: str, matched_reason: str) -> dict:
+    return {
+        "severity": severity,
+        "matched_reason": matched_reason,
+        "protocol": row.get("protocol"),
+        "local_address": row.get("local_address"),
+        "local_port": row.get("local_port"),
+        "remote_address": row.get("remote_address"),
+        "remote_port": row.get("remote_port"),
+        "pid": row.get("pid"),
+        "process_name": row.get("process_name"),
+        "source_plugin": row.get("source_plugin"),
+    }
+
+
+def is_suspicious_command(command: str | None) -> tuple[bool, str | None]:
+    if not command:
+        return False, None
+    if command_has_encoded_powershell(command):
+        return True, "encoded PowerShell command"
+    lowered = WHITESPACE_RE.sub(" ", command.lower())
+    for keyword in sorted(SUSPICIOUS_COMMAND_KEYWORDS):
+        if keyword in lowered:
+            return True, f"suspicious command keyword: {keyword.strip()}"
+    return False, None
+
+
+def extract_command_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for row in rows:
+        findings = linked_findings(risk_index, COMMAND_TABLE, row)
+        suspicious, reason = is_suspicious_command(row.get("command"))
+        if not suspicious and not findings:
+            continue
+        severity = severity_from_findings(findings, "high" if suspicious else "medium")
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_COMMAND_LINE,
+                row.get("command"),
+                row.get("source_plugin"),
+                confidence_for_severity(severity, 80),
+                reason or "linked risk finding",
+                {
+                    "severity": severity,
+                    "matched_reason": reason or "linked risk finding",
+                    "pid": row.get("pid"),
+                    "process_name": row.get("process_name"),
+                    "shell_type": row.get("shell_type"),
+                    "source_plugin": row.get("source_plugin"),
+                },
+                first_finding_id(findings),
+            ),
+        )
+    return iocs
+
+
+def is_suspicious_path(path: str | None, os_family: str | None) -> tuple[bool, str | None]:
+    if not path:
+        return False, None
+    normalized = normalize_path(path, os_family)
+    for fragment in sorted(USER_WRITABLE_PATH_FRAGMENTS):
+        if fragment in normalized:
+            return True, f"user-writable path fragment: {fragment}"
+    return False, None
+
+
+def extract_module_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for row in rows:
+        findings = linked_findings(risk_index, MODULE_TABLE, row)
+        suspicious, reason = is_suspicious_path(row.get("module_path"), context.get("os_family"))
+        if not suspicious and not findings:
+            continue
+        severity = severity_from_findings(findings, "medium")
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_MODULE_PATH,
+                row.get("module_path"),
+                row.get("source_plugin"),
+                confidence_for_severity(severity, 70),
+                reason or "linked risk finding",
+                {
+                    "severity": severity,
+                    "matched_reason": reason or "linked risk finding",
+                    "module_name": row.get("module_name"),
+                    "pid": row.get("pid"),
+                    "process_name": row.get("process_name"),
+                    "source_plugin": row.get("source_plugin"),
+                },
+                first_finding_id(findings),
+            ),
+        )
+    return iocs
+
+
+def extract_process_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for row in rows:
+        findings = linked_findings(risk_index, PROCESS_TABLE, row)
+        suspicious_path, reason = is_suspicious_path(row.get("image_path"), context.get("os_family"))
+        hidden_candidate = bool(row.get("is_hidden_candidate")) and bool(findings)
+        if not findings and not suspicious_path and not hidden_candidate:
+            continue
+        severity = severity_from_findings(findings, "high" if hidden_candidate else "medium")
+        matched_reason = reason or "linked risk finding"
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_PROCESS_NAME,
+                row.get("name"),
+                row.get("source_plugin"),
+                confidence_for_severity(severity, 70),
+                matched_reason,
+                process_extra(row, severity, matched_reason),
+                first_finding_id(findings),
+            ),
+        )
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_PID,
+                row.get("pid"),
+                row.get("source_plugin"),
+                min(confidence_for_severity(severity, 60), 70),
+                "contextual PID linked to suspicious process evidence",
+                process_extra(row, severity, matched_reason),
+                first_finding_id(findings),
+            ),
+        )
+        if row.get("image_path") and (suspicious_path or findings):
+            append_if_present(
+                iocs,
+                make_ioc(
+                    context,
+                    IOC_FILE_PATH,
+                    row.get("image_path"),
+                    row.get("source_plugin"),
+                    confidence_for_severity(severity, 70),
+                    matched_reason,
+                    process_extra(row, severity, matched_reason),
+                    first_finding_id(findings),
+                ),
+            )
+    return iocs
+
+
+def process_extra(row: dict, severity: str, matched_reason: str) -> dict:
+    return {
+        "severity": severity,
+        "matched_reason": matched_reason,
+        "pid": row.get("pid"),
+        "ppid": row.get("ppid"),
+        "process_name": row.get("name") or row.get("process_name"),
+        "image_path": row.get("image_path"),
+        "source_plugin": row.get("source_plugin"),
+    }
+
+
+def extract_yara_iocs(rows: list[dict], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for row in rows:
+        metadata = row.get("extra_data") or {}
+        severity = str(metadata.get("severity") or "high").lower()
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_YARA_RULE,
+                row.get("rule_name"),
+                row.get("source_plugin"),
+                confidence_for_severity(severity, 85),
+                "YARA rule matched memory content",
+                {
+                    "severity": severity,
+                    "namespace": row.get("namespace"),
+                    "tags": row.get("tags"),
+                    "target_identifier": row.get("target_identifier"),
+                    "target_type": row.get("target_type"),
+                    "offset": row.get("offset"),
+                    "matched_text_excerpt": row.get("matched_text_excerpt"),
+                    "source_plugin": row.get("source_plugin"),
+                },
+            ),
+        )
+    return iocs
+
+
+def extract_memory_region_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for row in rows:
+        findings = linked_findings(risk_index, MEMORY_REGION_TABLE, row)
+        suspicious = bool(row.get("is_executable")) or row.get("source_plugin") in {"windows.malfind", "linux.vmayarascan"}
+        if not suspicious and not findings:
+            continue
+        start = row.get("start_address") or "unknown"
+        end = row.get("end_address") or "unknown"
+        value = f"{row.get('pid')}:{start}-{end}"
+        severity = severity_from_findings(findings, "high" if suspicious else "medium")
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_MEMORY_REGION,
+                value,
+                row.get("source_plugin"),
+                confidence_for_severity(severity, 80),
+                "suspicious memory region",
+                {
+                    "severity": severity,
+                    "matched_reason": "suspicious memory region",
+                    "pid": row.get("pid"),
+                    "process_name": row.get("process_name"),
+                    "start_address": row.get("start_address"),
+                    "end_address": row.get("end_address"),
+                    "protection": row.get("protection"),
+                    "description": row.get("description"),
+                    "is_executable": row.get("is_executable"),
+                    "is_private": row.get("is_private"),
+                    "source_plugin": row.get("source_plugin"),
+                },
+                first_finding_id(findings),
+            ),
+        )
+    return iocs
+
+
+def extract_plugin_reference_iocs(risk_findings: list[dict], context: dict) -> list[IOCRecordDraft]:
+    iocs = []
+    for finding in risk_findings:
+        if finding.get("category") == "process_risk_summary" or not finding.get("source_plugin"):
+            continue
+        severity = str(finding.get("severity") or "low").lower()
+        append_if_present(
+            iocs,
+            make_ioc(
+                context,
+                IOC_PLUGIN_REFERENCE,
+                finding.get("source_plugin"),
+                finding.get("source_plugin"),
+                min(confidence_for_severity(severity, 45), 60),
+                "plugin source reference from concrete risk finding",
+                {
+                    "severity": severity,
+                    "rule_id": finding.get("rule_id"),
+                    "rule_name": finding.get("rule_name"),
+                    "risk_finding_id": str(finding.get("id")),
+                },
+                finding.get("id"),
+            ),
+        )
+    return iocs
