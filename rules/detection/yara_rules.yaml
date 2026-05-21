@@ -1,0 +1,12 @@
+rules:
+  - id: YARA_MATCH
+    name: YARA match
+    description: Creates a risk finding for each YARA match artifact.
+    category: yara
+    os_scope: all
+    severity: high
+    score: 8
+    enabled: true
+    recommendation: Review the matched rule, offset, and surrounding memory context.
+    match:
+      type: yara_match

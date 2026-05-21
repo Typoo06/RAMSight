@@ -1,0 +1,15 @@
+rules:
+  - id: SUSPICIOUS_EXECUTABLE_MEMORY_REGION
+    name: Suspicious executable memory region
+    description: Detects memory region artifacts produced by malfind-like plugins, especially executable regions.
+    category: memory_region
+    os_scope: all
+    severity: high
+    score: 8
+    enabled: true
+    recommendation: Review the process, memory permissions, and raw malfind output before drawing conclusions.
+    match:
+      type: malfind_memory_region
+      source_plugins:
+        - windows.malfind
+        - linux.vmayarascan

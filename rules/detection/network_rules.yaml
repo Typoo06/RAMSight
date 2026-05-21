@@ -1,0 +1,12 @@
+rules:
+  - id: EXTERNAL_NETWORK_CONNECTION
+    name: External network connection
+    description: Detects network artifacts with public remote IP addresses.
+    category: network
+    os_scope: all
+    severity: medium
+    score: 5
+    enabled: true
+    recommendation: Validate whether the destination is expected and preserve connection metadata for triage.
+    match:
+      type: external_network_connection

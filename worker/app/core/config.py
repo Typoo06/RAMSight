@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
     celery_broker_url: str = Field(default="redis://redis:6379/0", alias="CELERY_BROKER_URL")
     celery_result_backend: str = Field(default="redis://redis:6379/1", alias="CELERY_RESULT_BACKEND")
+    rules_dir: str = Field(default="/rules", alias="RULES_DIR")
 
     minio_endpoint: str = Field(default="minio:9000", alias="MINIO_ENDPOINT")
     minio_access_key: str = Field(default="change-me", alias="MINIO_ACCESS_KEY")

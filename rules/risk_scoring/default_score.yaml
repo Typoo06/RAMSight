@@ -1,0 +1,24 @@
+severity_scores:
+  low: 2
+  medium: 5
+  high: 8
+  critical: 13
+risk_levels:
+  low:
+    min: 0
+    max: 3
+  medium:
+    min: 4
+    max: 7
+  high:
+    min: 8
+    max: 12
+  critical:
+    min: 13
+    max: null
+aggregation:
+  process:
+    key_fields:
+      - pid
+      - process_name
+    max_findings_per_process: 20

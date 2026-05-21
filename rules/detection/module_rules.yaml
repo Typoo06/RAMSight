@@ -1,0 +1,19 @@
+rules:
+  - id: WIN_SUSPICIOUS_MODULE_PATH
+    name: Suspicious module path
+    description: Detects loaded modules from temporary or user-writable paths.
+    category: module
+    os_scope: windows
+    severity: medium
+    score: 5
+    enabled: true
+    recommendation: Review module provenance and hash the file if available.
+    match:
+      type: suspicious_module_path
+      suspicious_path_fragments:
+        - "\\Temp\\"
+        - "/Temp/"
+        - "\\AppData\\"
+        - "/AppData/"
+        - "\\Users\\Public\\"
+        - "/Users/Public/"

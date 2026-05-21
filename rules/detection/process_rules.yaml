@@ -1,0 +1,52 @@
+rules:
+  - id: WIN_SYSTEM_PROCESS_WRONG_PATH
+    name: System process running from wrong path
+    description: Detects common Windows system process names outside expected system directories.
+    category: process
+    os_scope: windows
+    severity: high
+    score: 8
+    enabled: true
+    recommendation: Verify the executable path and compare the binary against a trusted baseline.
+    match:
+      type: system_process_wrong_path
+      process_names:
+        - smss.exe
+        - csrss.exe
+        - wininit.exe
+        - winlogon.exe
+        - services.exe
+        - lsass.exe
+        - svchost.exe
+      expected_paths:
+        - "C:\\Windows\\System32\\"
+        - "C:/Windows/System32/"
+  - id: WIN_SUSPICIOUS_PARENT_CHILD
+    name: Suspicious parent-child relationship
+    description: Detects process parent-child relationships commonly abused during intrusion activity.
+    category: process
+    os_scope: windows
+    severity: medium
+    score: 5
+    enabled: true
+    recommendation: Review the parent process, command line, and user context for the child process.
+    match:
+      type: suspicious_parent_child
+      pairs:
+        - parent: winword.exe
+          child: powershell.exe
+        - parent: excel.exe
+          child: powershell.exe
+        - parent: outlook.exe
+          child: cmd.exe
+  - id: WIN_PSSCAN_ONLY_PROCESS
+    name: Process appears in psscan but not pslist
+    description: Identifies a hidden process candidate by comparing psscan results against pslist by PID.
+    category: process
+    os_scope: windows
+    severity: high
+    score: 8
+    enabled: true
+    recommendation: Treat as a hidden process candidate and validate with additional artifacts before concluding malware.
+    match:
+      type: psscan_only_process

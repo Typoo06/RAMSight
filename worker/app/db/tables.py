@@ -201,3 +201,28 @@ yara_matches = Table(
     Column("extra_data", JSON),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+
+risk_findings = Table(
+    "risk_findings",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("os_scope", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("rule_id", String(255)),
+    Column("rule_name", String(255)),
+    Column("category", String(100)),
+    Column("severity", String(20), nullable=False),
+    Column("score", Integer, nullable=False),
+    Column("title", String(255), nullable=False),
+    Column("description", Text),
+    Column("artifact_type", String(100)),
+    Column("artifact_id", String(100)),
+    Column("recommendation", Text),
+    Column("extra_data", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)

@@ -10,6 +10,7 @@ dependencies = [
   "psycopg[binary]",
   "pydantic",
   "pydantic-settings",
+  "pyyaml",
   "minio",
   "pytest",
   "yara-python",

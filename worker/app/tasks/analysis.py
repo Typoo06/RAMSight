@@ -13,6 +13,7 @@ from app.celery_app import celery_app
 from app.core.config import get_settings
 from app.db.session import engine
 from app.db.tables import analysis_jobs, evidences, plugin_results
+from app.detection.persistence import insert_detection_stage_error, run_detection_for_job
 from app.parsers.common import ParserError
 from app.parsers.persistence import (
     insert_artifact_batch,
@@ -229,6 +230,7 @@ def run_analysis_job(job_id: str) -> dict:
             raw_dir = workspace / "raw"
             successful_plugins = 0
             plugin_result_ids = []
+            detection_finding_count = 0
 
             for plugin in selected_plugins:
                 plugin_started_at = utc_now()
@@ -286,6 +288,21 @@ def run_analysis_job(job_id: str) -> dict:
                 if status == STATUS_COMPLETED:
                     successful_plugins += 1
 
+            if successful_plugins > 0:
+                detection_context = {
+                    "analysis_job_id": parsed_job_id,
+                    "evidence_id": context["evidence_id"],
+                    "os_family": context.get("job_os_family") or context.get("evidence_os_family") or "unknown",
+                }
+                try:
+                    with engine.begin() as conn:
+                        detection_finding_count = run_detection_for_job(
+                            conn, detection_context, get_settings().rules_dir
+                        )
+                except Exception as exc:  # noqa: BLE001 - detection errors should not discard analysis artifacts.
+                    with engine.begin() as conn:
+                        insert_detection_stage_error(conn, detection_context, short_error_message(exc))
+
         completed_at = utc_now()
         elapsed_ms = duration_ms_since(task_started)
         with engine.begin() as conn:
@@ -301,6 +318,7 @@ def run_analysis_job(job_id: str) -> dict:
             "job_id": str(parsed_job_id),
             "plugin_result_ids": [str(plugin_result_id) for plugin_result_id in plugin_result_ids],
             "successful_plugins": successful_plugins,
+            "detection_findings": detection_finding_count,
         }
     except Exception as exc:  # noqa: BLE001 - task boundary stores a safe failure summary.
         completed_at = utc_now()

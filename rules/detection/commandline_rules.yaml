@@ -1,0 +1,30 @@
+rules:
+  - id: WIN_ENCODED_POWERSHELL
+    name: Encoded PowerShell command
+    description: Detects PowerShell commands using encoded command flags or long Base64-like arguments.
+    category: command_line
+    os_scope: windows
+    severity: high
+    score: 8
+    enabled: true
+    recommendation: Decode the command where safe and review process lineage and user context.
+    match:
+      type: encoded_powershell
+  - id: SUSPICIOUS_COMMAND_KEYWORDS
+    name: Suspicious command line keywords
+    description: Detects command lines containing keywords commonly associated with credential access or payload retrieval.
+    category: command_line
+    os_scope: all
+    severity: medium
+    score: 5
+    enabled: true
+    recommendation: Review the command intent and correlate with process ancestry and network activity.
+    match:
+      type: suspicious_command_keywords
+      keywords:
+        - invoke-expression
+        - downloadstring
+        - frombase64string
+        - mimikatz
+        - rundll32
+        - certutil
