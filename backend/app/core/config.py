@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     minio_bucket_reports: str = Field(default="reports", alias="MINIO_BUCKET_REPORTS")
     minio_bucket_raw_outputs: str = Field(default="raw-outputs", alias="MINIO_BUCKET_RAW_OUTPUTS")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
+    evidence_max_upload_bytes: int = Field(default=21474836480, alias="EVIDENCE_MAX_UPLOAD_BYTES")
 
 
 @lru_cache
