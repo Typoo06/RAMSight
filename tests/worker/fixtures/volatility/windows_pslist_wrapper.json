@@ -1,0 +1,8 @@
+{
+  "plugin_name": "windows.pslist",
+  "source_plugin": "windows.pslist",
+  "status": "completed",
+  "stdout": "{\"columns\":[\"PID\",\"PPID\",\"ImageFileName\",\"CreateTime\"],\"rows\":[[4,0,\"System\",\"2024-01-01T00:00:00+00:00\"]]}",
+  "stderr": "",
+  "renderer": "json"
+}

@@ -1,6 +1,6 @@
 # Minimal SQLAlchemy Core tables needed by the worker skeleton.
 
-from sqlalchemy import BigInteger, Column, DateTime, Integer, JSON, MetaData, String, Table, Text, Uuid
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, JSON, MetaData, String, Table, Text, Uuid
 
 metadata = MetaData()
 
@@ -73,4 +73,131 @@ plugin_results = Table(
     Column("completed_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+process_artifacts = Table(
+    "process_artifacts",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("raw_record", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("pid", Integer),
+    Column("ppid", Integer),
+    Column("name", String(255)),
+    Column("image_path", String(1024)),
+    Column("command_line", Text),
+    Column("user_name", String(255)),
+    Column("session_id", Integer),
+    Column("created_time", DateTime(timezone=True)),
+    Column("exited_time", DateTime(timezone=True)),
+    Column("is_hidden_candidate", Boolean, nullable=False),
+)
+
+network_artifacts = Table(
+    "network_artifacts",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("raw_record", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("protocol", String(50)),
+    Column("local_address", String(255)),
+    Column("local_port", Integer),
+    Column("remote_address", String(255)),
+    Column("remote_port", Integer),
+    Column("state", String(100)),
+    Column("pid", Integer),
+    Column("process_name", String(255)),
+    Column("created_time", DateTime(timezone=True)),
+)
+
+module_artifacts = Table(
+    "module_artifacts",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("raw_record", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("pid", Integer),
+    Column("process_name", String(255)),
+    Column("module_name", String(255)),
+    Column("module_path", String(1024)),
+    Column("base_address", String(100)),
+    Column("size_bytes", BigInteger),
+    Column("load_time", DateTime(timezone=True)),
+)
+
+memory_region_artifacts = Table(
+    "memory_region_artifacts",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("raw_record", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("pid", Integer),
+    Column("process_name", String(255)),
+    Column("start_address", String(100)),
+    Column("end_address", String(100)),
+    Column("protection", String(100)),
+    Column("is_executable", Boolean, nullable=False),
+    Column("is_private", Boolean, nullable=False),
+    Column("description", Text),
+    Column("hexdump_excerpt", Text),
+    Column("disassembly_excerpt", Text),
+)
+
+command_artifacts = Table(
+    "command_artifacts",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("raw_record", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("pid", Integer),
+    Column("process_name", String(255)),
+    Column("command", Text),
+    Column("shell_type", String(100)),
+    Column("user_name", String(255)),
+    Column("executed_at", DateTime(timezone=True)),
+)
+
+yara_matches = Table(
+    "yara_matches",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("plugin_result_id", Uuid()),
+    Column("os_family", String(20), nullable=False),
+    Column("source_plugin", String(255)),
+    Column("rule_name", String(255), nullable=False),
+    Column("namespace", String(255)),
+    Column("tags", JSON),
+    Column("target_type", String(100)),
+    Column("target_identifier", String(255)),
+    Column("offset", Integer),
+    Column("matched_text_excerpt", Text),
+    Column("extra_data", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )

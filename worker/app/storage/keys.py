@@ -26,3 +26,11 @@ def raw_plugin_output_key(case_id: object, job_id: object, plugin_name: str) -> 
         f"job-{normalize_object_name_part(job_id)}/raw/"
         f"{normalize_plugin_name_part(plugin_name)}.json"
     )
+
+
+def parsed_plugin_output_key(case_id: object, job_id: object, plugin_name: str) -> str:
+    return (
+        f"case-{normalize_object_name_part(case_id)}/"
+        f"job-{normalize_object_name_part(job_id)}/parsed/"
+        f"{normalize_plugin_name_part(plugin_name)}.json"
+    )

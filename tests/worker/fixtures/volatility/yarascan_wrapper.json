@@ -1,0 +1,8 @@
+{
+  "plugin_name": "yarascan",
+  "source_plugin": "yarascan",
+  "status": "completed",
+  "stdout": "[{\"Rule\":\"SuspiciousRule\",\"Namespace\":\"default\",\"Tags\":[\"memory\"],\"Offset\":\"0x400123\",\"Value\":\"MZ header\",\"Owner\":\"proc.exe\"}]",
+  "stderr": "",
+  "renderer": "json"
+}

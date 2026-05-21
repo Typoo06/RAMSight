@@ -1,0 +1,8 @@
+{
+  "plugin_name": "windows.handles",
+  "source_plugin": "windows.handles",
+  "status": "completed",
+  "stdout": "[{\"PID\":123,\"Process\":\"proc.exe\",\"HandleValue\":\"0x40\",\"Type\":\"File\",\"Name\":\"C:/Temp/a.txt\"}]",
+  "stderr": "",
+  "renderer": "json"
+}

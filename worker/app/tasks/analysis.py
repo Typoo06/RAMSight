@@ -13,6 +13,14 @@ from app.celery_app import celery_app
 from app.core.config import get_settings
 from app.db.session import engine
 from app.db.tables import analysis_jobs, evidences, plugin_results
+from app.parsers.common import ParserError
+from app.parsers.persistence import (
+    insert_artifact_batch,
+    update_plugin_result_parse_error,
+    update_plugin_result_parsed_output,
+    write_parsed_output,
+)
+from app.parsers.registry import parse_raw_wrapper
 from app.storage.client import ObjectStorageClient, StorageObject
 from app.storage.keys import normalize_object_name_part
 from app.tasks.status import STATUS_COMPLETED, STATUS_FAILED, STATUS_QUEUED, STATUS_RUNNING
@@ -241,18 +249,40 @@ def run_analysis_job(job_id: str) -> dict:
                     error_message = short_error_message(f"raw output upload failed: {exc}")
 
                 with engine.begin() as conn:
-                    plugin_result_ids.append(
-                        insert_plugin_result(
-                            conn,
-                            context,
-                            run_result,
-                            raw_output,
-                            plugin_started_at,
-                            plugin_completed_at,
-                            status,
-                            error_message,
-                        )
+                    plugin_result_id = insert_plugin_result(
+                        conn,
+                        context,
+                        run_result,
+                        raw_output,
+                        plugin_started_at,
+                        plugin_completed_at,
+                        status,
+                        error_message,
                     )
+                    plugin_result_ids.append(plugin_result_id)
+
+                if status == STATUS_COMPLETED:
+                    parse_context = {**context, "source_plugin": run_result.source_plugin}
+                    try:
+                        batch = parse_raw_wrapper(run_result.raw_output_path)
+                        parsed_path = workspace / "parsed" / run_result.raw_output_path.name
+                        parsed_count = len(batch.records)
+                        write_parsed_output(parsed_path, batch, parsed_count)
+                        parsed_output = storage_client.upload_parsed_output(
+                            context["case_id"], parsed_job_id, run_result.plugin_name, parsed_path
+                        )
+                        with engine.begin() as conn:
+                            parsed_count = insert_artifact_batch(
+                                conn, batch, parse_context, plugin_result_id, utc_now()
+                            )
+                            update_plugin_result_parsed_output(
+                                conn, plugin_result_id, parsed_output.bucket, parsed_output.key, parsed_count
+                            )
+                    except (ParserError, Exception) as exc:  # noqa: BLE001 - parser failures stay plugin-local.
+                        with engine.begin() as conn:
+                            update_plugin_result_parse_error(
+                                conn, plugin_result_id, error_message, short_error_message(exc)
+                            )
                 if status == STATUS_COMPLETED:
                     successful_plugins += 1
 

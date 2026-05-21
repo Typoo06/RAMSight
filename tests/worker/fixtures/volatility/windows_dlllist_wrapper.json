@@ -1,0 +1,8 @@
+{
+  "plugin_name": "windows.dlllist",
+  "source_plugin": "windows.dlllist",
+  "status": "completed",
+  "stdout": "[{\"PID\":123,\"Process\":\"proc.exe\",\"BaseDllName\":\"evil.dll\",\"FullDllName\":\"C:/Temp/evil.dll\",\"Base\":\"0x10000000\",\"Size\":4096}]",
+  "stderr": "",
+  "renderer": "json"
+}

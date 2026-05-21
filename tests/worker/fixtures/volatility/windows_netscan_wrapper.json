@@ -1,0 +1,8 @@
+{
+  "plugin_name": "windows.netscan",
+  "source_plugin": "windows.netscan",
+  "status": "completed",
+  "stdout": "[{\"Proto\":\"TCPv4\",\"LocalAddr\":\"127.0.0.1:4444\",\"ForeignAddr\":\"10.0.0.2:80\",\"State\":\"ESTABLISHED\",\"PID\":123,\"Owner\":\"proc.exe\"}]",
+  "stderr": "",
+  "renderer": "json"
+}

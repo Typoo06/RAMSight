@@ -1,0 +1,8 @@
+{
+  "plugin_name": "windows.cmdline",
+  "source_plugin": "windows.cmdline",
+  "status": "completed",
+  "stdout": "[{\"PID\":123,\"Process\":\"powershell.exe\",\"Args\":\"powershell.exe -enc AAAA\"}]",
+  "stderr": "",
+  "renderer": "json"
+}

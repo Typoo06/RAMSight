@@ -1,0 +1,8 @@
+{
+  "plugin_name": "windows.malfind",
+  "source_plugin": "windows.malfind",
+  "status": "completed",
+  "stdout": "[{\"PID\":123,\"Process\":\"proc.exe\",\"Start\":\"0x400000\",\"End\":\"0x401000\",\"Protection\":\"PAGE_EXECUTE_READWRITE\",\"Hexdump\":\"4d 5a\"}]",
+  "stderr": "",
+  "renderer": "json"
+}

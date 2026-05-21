@@ -6,7 +6,7 @@ from pathlib import Path
 from minio import Minio
 
 from app.core.config import Settings, get_settings
-from app.storage.keys import raw_plugin_output_key
+from app.storage.keys import parsed_plugin_output_key, raw_plugin_output_key
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,22 @@ class ObjectStorageClient:
     ) -> StorageObject:
         self.ensure_raw_outputs_bucket()
         object_key = raw_plugin_output_key(case_id, job_id, plugin_name)
+        result = self.client.fput_object(
+            self.raw_outputs_bucket,
+            object_key,
+            str(path),
+            content_type="application/json",
+        )
+        return StorageObject(
+            bucket=self.raw_outputs_bucket,
+            key=object_key,
+            size_bytes=path.stat().st_size,
+            etag=result.etag,
+        )
+
+    def upload_parsed_output(self, case_id: object, job_id: object, plugin_name: str, path: Path) -> StorageObject:
+        self.ensure_raw_outputs_bucket()
+        object_key = parsed_plugin_output_key(case_id, job_id, plugin_name)
         result = self.client.fput_object(
             self.raw_outputs_bucket,
             object_key,
