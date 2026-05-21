@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path, PurePath
 from time import perf_counter
 from uuid import UUID, uuid4
@@ -11,18 +10,17 @@ from sqlalchemy import and_, insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.celery_app import celery_app
+from app.core.config import get_settings
 from app.db.session import engine
 from app.db.tables import analysis_jobs, evidences, plugin_results
 from app.storage.client import ObjectStorageClient, StorageObject
 from app.storage.keys import normalize_object_name_part
+from app.tasks.status import STATUS_COMPLETED, STATUS_FAILED, STATUS_QUEUED, STATUS_RUNNING
 from app.utils.workspace import isolated_job_workspace
+from app.volatility.registry import select_plugins
+from app.volatility.runner import VolatilityRunResult, ensure_volatility_available, run_volatility_plugin
 
 ANALYSIS_TASK_NAME = "app.tasks.analysis.run_analysis_job"
-PLACEHOLDER_PLUGIN_NAME = "analysis.placeholder"
-STATUS_QUEUED = "queued"
-STATUS_RUNNING = "running"
-STATUS_COMPLETED = "completed"
-STATUS_FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -120,62 +118,16 @@ def evidence_download_path(workspace: Path, original_filename: str | None) -> Pa
     return workspace / "evidence" / safe_name
 
 
-# Placeholder output is OS-neutral so Linux support can reuse the same pipeline shape.
-def create_placeholder_raw_output(
-    output_path: Path,
-    context: dict,
-    downloaded_evidence: StorageObject,
-) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "plugin_name": PLACEHOLDER_PLUGIN_NAME,
-        "source_plugin": PLACEHOLDER_PLUGIN_NAME,
-        "status": STATUS_COMPLETED,
-        "placeholder": True,
-        "generated_at": utc_now().isoformat(),
-        "message": "Placeholder analysis completed; real Volatility execution is not implemented yet.",
-        "job": {
-            "id": str(context["job_id"]),
-            "case_id": str(context["case_id"]),
-            "evidence_id": str(context["evidence_id"]),
-            "os_family": context.get("job_os_family"),
-            "os_version": context.get("job_os_version"),
-            "architecture": context.get("job_architecture"),
-            "kernel_version": context.get("job_kernel_version"),
-            "symbol_table": context.get("job_symbol_table"),
-            "plugin_profile": context.get("plugin_profile"),
-            "requested_plugins": context.get("requested_plugins"),
-        },
-        "evidence": {
-            "original_filename": context.get("original_filename"),
-            "size_bytes": context.get("evidence_size_bytes"),
-            "md5": context.get("md5"),
-            "sha256": context.get("sha256"),
-            "storage_bucket": context.get("storage_bucket"),
-            "storage_key": context.get("storage_key"),
-            "downloaded_size_bytes": downloaded_evidence.size_bytes,
-            "os_family": context.get("evidence_os_family"),
-            "os_version": context.get("evidence_os_version"),
-            "architecture": context.get("evidence_architecture"),
-            "kernel_version": context.get("evidence_kernel_version"),
-            "symbol_table": context.get("evidence_symbol_table"),
-            "acquisition_tool": context.get("acquisition_tool"),
-            "acquisition_time": (
-                context["acquisition_time"].isoformat() if context.get("acquisition_time") else None
-            ),
-        },
-    }
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-
-# One placeholder plugin result preserves the future raw-output contract without parsing yet.
-def insert_completed_placeholder_plugin_result(
+# Raw stdout/stderr stay in MinIO; PostgreSQL stores status and object metadata only.
+def insert_plugin_result(
     conn: Connection,
     context: dict,
-    raw_output: StorageObject,
+    run_result: VolatilityRunResult,
+    raw_output: StorageObject | None,
     started_at: datetime,
     completed_at: datetime,
-    duration_ms: int,
+    status: str,
+    error_message: str | None,
 ) -> UUID:
     plugin_result_id = uuid4()
     conn.execute(
@@ -185,17 +137,17 @@ def insert_completed_placeholder_plugin_result(
             evidence_id=context["evidence_id"],
             os_family=context.get("job_os_family") or context.get("evidence_os_family") or "unknown",
             plugin_profile=context.get("plugin_profile"),
-            plugin_name=PLACEHOLDER_PLUGIN_NAME,
-            source_plugin=PLACEHOLDER_PLUGIN_NAME,
-            status=STATUS_COMPLETED,
-            raw_output_bucket=raw_output.bucket,
-            raw_output_key=raw_output.key,
+            plugin_name=run_result.plugin_name,
+            source_plugin=run_result.source_plugin,
+            status=status,
+            raw_output_bucket=raw_output.bucket if raw_output else None,
+            raw_output_key=raw_output.key if raw_output else None,
             parsed_output_bucket=None,
             parsed_output_key=None,
             parsed_record_count=0,
-            error_message=None,
-            duration_ms=duration_ms,
-            extra_data={"placeholder": True},
+            error_message=error_message,
+            duration_ms=run_result.duration_ms,
+            extra_data={"return_code": run_result.return_code, "timed_out": run_result.timed_out},
             started_at=started_at,
             completed_at=completed_at,
             created_at=started_at,
@@ -247,48 +199,78 @@ def run_analysis_job(job_id: str) -> dict:
     if not claim.claimed:
         return {"status": "noop", "job_status": claim.status, "reason": claim.reason}
 
-    plugin_started_at = utc_now()
     try:
         with engine.begin() as conn:
             context = fetch_job_context(conn, parsed_job_id)
         validate_evidence_storage_metadata(context)
+        selected_plugins = select_plugins(
+            context.get("job_os_family"),
+            plugin_profile=context.get("plugin_profile"),
+            requested_plugins=context.get("requested_plugins"),
+        )
+        ensure_volatility_available(get_settings().volatility_path)
 
         storage_client = ObjectStorageClient()
         with isolated_job_workspace(parsed_job_id) as workspace:
             evidence_path = evidence_download_path(workspace, context.get("original_filename"))
-            downloaded_evidence = storage_client.download_file(
+            storage_client.download_file(
                 context["storage_bucket"],
                 context["storage_key"],
                 evidence_path,
             )
-            raw_output_path = workspace / "raw" / f"{PLACEHOLDER_PLUGIN_NAME}.json"
-            create_placeholder_raw_output(raw_output_path, context, downloaded_evidence)
-            uploaded_raw_output = storage_client.upload_raw_plugin_output(
-                context["case_id"],
-                parsed_job_id,
-                PLACEHOLDER_PLUGIN_NAME,
-                raw_output_path,
-            )
+            raw_dir = workspace / "raw"
+            successful_plugins = 0
+            plugin_result_ids = []
+
+            for plugin in selected_plugins:
+                plugin_started_at = utc_now()
+                run_result = run_volatility_plugin(plugin, evidence_path, raw_dir)
+                plugin_completed_at = utc_now()
+                raw_output = None
+                status = run_result.status
+                error_message = run_result.error_message
+                try:
+                    raw_output = storage_client.upload_raw_plugin_output(
+                        context["case_id"],
+                        parsed_job_id,
+                        run_result.plugin_name,
+                        run_result.raw_output_path,
+                    )
+                except Exception as exc:  # noqa: BLE001 - upload failure is stored as plugin metadata.
+                    status = STATUS_FAILED
+                    error_message = short_error_message(f"raw output upload failed: {exc}")
+
+                with engine.begin() as conn:
+                    plugin_result_ids.append(
+                        insert_plugin_result(
+                            conn,
+                            context,
+                            run_result,
+                            raw_output,
+                            plugin_started_at,
+                            plugin_completed_at,
+                            status,
+                            error_message,
+                        )
+                    )
+                if status == STATUS_COMPLETED:
+                    successful_plugins += 1
 
         completed_at = utc_now()
         elapsed_ms = duration_ms_since(task_started)
         with engine.begin() as conn:
-            plugin_result_id = insert_completed_placeholder_plugin_result(
-                conn,
-                context,
-                uploaded_raw_output,
-                plugin_started_at,
-                completed_at,
-                elapsed_ms,
-            )
-            mark_job_completed(conn, parsed_job_id, completed_at, elapsed_ms)
+            if successful_plugins > 0:
+                mark_job_completed(conn, parsed_job_id, completed_at, elapsed_ms)
+                job_status = STATUS_COMPLETED
+            else:
+                mark_job_failed(conn, parsed_job_id, "all selected Volatility plugins failed", completed_at, elapsed_ms)
+                job_status = STATUS_FAILED
 
         return {
-            "status": STATUS_COMPLETED,
+            "status": job_status,
             "job_id": str(parsed_job_id),
-            "plugin_result_id": str(plugin_result_id),
-            "raw_output_bucket": uploaded_raw_output.bucket,
-            "raw_output_key": uploaded_raw_output.key,
+            "plugin_result_ids": [str(plugin_result_id) for plugin_result_id in plugin_result_ids],
+            "successful_plugins": successful_plugins,
         }
     except Exception as exc:  # noqa: BLE001 - task boundary stores a safe failure summary.
         completed_at = utc_now()

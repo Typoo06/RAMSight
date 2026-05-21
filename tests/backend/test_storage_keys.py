@@ -13,13 +13,13 @@ def test_evidence_object_key_is_os_neutral_and_safe() -> None:
 
 
 def test_raw_plugin_output_key_normalizes_plugin_name() -> None:
-    assert raw_plugin_output_key("abc", "job-1", "windows.malfind") == "case-abc/job-job-1/raw/windows.malfind.json"
+    assert raw_plugin_output_key("abc", "job-1", "windows.malfind") == "case-abc/job-job-1/raw/windows_malfind.json"
 
 
 def test_parsed_plugin_output_key_uses_raw_outputs_layout() -> None:
     assert (
         parsed_plugin_output_key("abc", "job-1", "linux.vmayarascan")
-        == "case-abc/job-job-1/parsed/linux.vmayarascan.json"
+        == "case-abc/job-job-1/parsed/linux_vmayarascan.json"
     )
 
 

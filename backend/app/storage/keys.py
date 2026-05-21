@@ -16,6 +16,10 @@ def normalize_object_name_part(value: object) -> str:
     return safe_value
 
 
+def normalize_plugin_name_part(plugin_name: str) -> str:
+    return normalize_object_name_part(plugin_name.replace(".", "_"))
+
+
 def evidence_object_key(case_id: object, evidence_id: object, filename: str) -> str:
     return (
         f"case-{normalize_object_name_part(case_id)}/"
@@ -28,7 +32,7 @@ def raw_plugin_output_key(case_id: object, job_id: object, plugin_name: str) -> 
     return (
         f"case-{normalize_object_name_part(case_id)}/"
         f"job-{normalize_object_name_part(job_id)}/raw/"
-        f"{normalize_object_name_part(plugin_name)}.json"
+        f"{normalize_plugin_name_part(plugin_name)}.json"
     )
 
 
@@ -36,7 +40,7 @@ def parsed_plugin_output_key(case_id: object, job_id: object, plugin_name: str) 
     return (
         f"case-{normalize_object_name_part(case_id)}/"
         f"job-{normalize_object_name_part(job_id)}/parsed/"
-        f"{normalize_object_name_part(plugin_name)}.json"
+        f"{normalize_plugin_name_part(plugin_name)}.json"
     )
 
 

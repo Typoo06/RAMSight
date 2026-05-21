@@ -1,19 +1,16 @@
 # Worker analysis task helper tests.
 
-import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import create_engine, insert, select, update
 
 from app.db.tables import analysis_jobs, metadata
-from app.storage.client import StorageObject
 from app.tasks.analysis import (
-    PLACEHOLDER_PLUGIN_NAME,
     STATUS_COMPLETED,
     STATUS_QUEUED,
     claim_queued_job,
-    create_placeholder_raw_output,
+    evidence_download_path,
 )
 from app.utils.workspace import isolated_job_workspace
 
@@ -28,49 +25,10 @@ def test_isolated_job_workspace_cleans_up(tmp_path) -> None:
     assert not workspace.exists()
 
 
-def test_create_placeholder_raw_output_is_os_neutral(tmp_path) -> None:
-    output_path = tmp_path / "raw" / "placeholder.json"
-    job_id = uuid4()
-    case_id = uuid4()
-    evidence_id = uuid4()
+def test_evidence_download_path_removes_source_paths(tmp_path) -> None:
+    path = evidence_download_path(tmp_path, "../memory dumps/sample.raw")
 
-    create_placeholder_raw_output(
-        output_path,
-        {
-            "job_id": job_id,
-            "case_id": case_id,
-            "evidence_id": evidence_id,
-            "job_os_family": "unknown",
-            "job_os_version": None,
-            "job_architecture": None,
-            "job_kernel_version": None,
-            "job_symbol_table": None,
-            "plugin_profile": "default",
-            "requested_plugins": None,
-            "original_filename": "sample.raw",
-            "evidence_size_bytes": 10,
-            "md5": "0" * 32,
-            "sha256": "1" * 64,
-            "storage_bucket": "evidence",
-            "storage_key": "case-a/evidence-b/sample.raw",
-            "evidence_os_family": "unknown",
-            "evidence_os_version": None,
-            "evidence_architecture": None,
-            "evidence_kernel_version": None,
-            "evidence_symbol_table": None,
-            "acquisition_tool": None,
-            "acquisition_time": None,
-        },
-        StorageObject(bucket="evidence", key="case-a/evidence-b/sample.raw", size_bytes=10),
-    )
-
-    payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["plugin_name"] == PLACEHOLDER_PLUGIN_NAME
-    assert payload["source_plugin"] == PLACEHOLDER_PLUGIN_NAME
-    assert payload["status"] == STATUS_COMPLETED
-    assert payload["placeholder"] is True
-    assert "windows." not in payload["plugin_name"]
-    assert "linux." not in payload["plugin_name"]
+    assert path == tmp_path / "evidence" / "evidence.raw"
 
 
 def test_claim_queued_job_only_claims_queued_jobs() -> None:
@@ -106,4 +64,3 @@ def test_claim_queued_job_only_claims_queued_jobs() -> None:
     assert completed_claim.claimed is False
     assert completed_claim.status == STATUS_COMPLETED
     assert stored_status == "running"
-
