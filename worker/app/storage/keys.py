@@ -42,3 +42,11 @@ def ioc_export_key(case_id: object, job_id: object, filename: str) -> str:
         f"job-{normalize_object_name_part(job_id)}/iocs/"
         f"{normalize_object_name_part(filename)}"
     )
+
+
+def report_object_key(case_id: object, job_id: object, report_filename: str) -> str:
+    return (
+        f"case-{normalize_object_name_part(case_id)}/"
+        f"job-{normalize_object_name_part(job_id)}/reports/"
+        f"{normalize_object_name_part(report_filename)}"
+    )

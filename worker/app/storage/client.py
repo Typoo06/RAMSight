@@ -6,7 +6,7 @@ from pathlib import Path
 from minio import Minio
 
 from app.core.config import Settings, get_settings
-from app.storage.keys import ioc_export_key, parsed_plugin_output_key, raw_plugin_output_key
+from app.storage.keys import ioc_export_key, parsed_plugin_output_key, raw_plugin_output_key, report_object_key
 
 
 @dataclass(frozen=True)
@@ -33,9 +33,17 @@ class ObjectStorageClient:
     def raw_outputs_bucket(self) -> str:
         return self.settings.minio_bucket_raw_outputs
 
+    @property
+    def reports_bucket(self) -> str:
+        return self.settings.minio_bucket_reports
+
     def ensure_raw_outputs_bucket(self) -> None:
         if not self.client.bucket_exists(self.raw_outputs_bucket):
             self.client.make_bucket(self.raw_outputs_bucket)
+
+    def ensure_reports_bucket(self) -> None:
+        if not self.client.bucket_exists(self.reports_bucket):
+            self.client.make_bucket(self.reports_bucket)
 
     def download_file(self, bucket: str, object_key: str, destination_path: Path) -> StorageObject:
         destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +99,22 @@ class ObjectStorageClient:
         )
         return StorageObject(
             bucket=self.raw_outputs_bucket,
+            key=object_key,
+            size_bytes=path.stat().st_size,
+            etag=result.etag,
+        )
+
+    def upload_report(self, case_id: object, job_id: object, filename: str, path: Path, content_type: str) -> StorageObject:
+        self.ensure_reports_bucket()
+        object_key = report_object_key(case_id, job_id, filename)
+        result = self.client.fput_object(
+            self.reports_bucket,
+            object_key,
+            str(path),
+            content_type=content_type,
+        )
+        return StorageObject(
+            bucket=self.reports_bucket,
             key=object_key,
             size_bytes=path.stat().st_size,
             etag=result.etag,

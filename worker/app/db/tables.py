@@ -4,6 +4,19 @@ from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, JSON, Met
 
 metadata = MetaData()
 
+cases = Table(
+    "cases",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("case_code", String(64), nullable=False),
+    Column("name", String(255), nullable=False),
+    Column("description", Text),
+    Column("status", String(50), nullable=False),
+    Column("created_by_id", Uuid()),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 analysis_jobs = Table(
     "analysis_jobs",
     metadata,
@@ -33,6 +46,7 @@ evidences = Table(
     Column("case_id", Uuid(), nullable=False),
     Column("source_type", String(50), nullable=False),
     Column("original_filename", String(255), nullable=False),
+    Column("content_type", String(255)),
     Column("size_bytes", BigInteger),
     Column("md5", String(32)),
     Column("sha256", String(64)),
@@ -242,6 +256,36 @@ iocs = Table(
     Column("context", Text),
     Column("confidence", Integer),
     Column("extra_data", JSON),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+reports = Table(
+    "reports",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("case_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid(), nullable=False),
+    Column("analysis_job_id", Uuid(), nullable=False),
+    Column("os_family", String(20), nullable=False),
+    Column("report_type", String(50), nullable=False),
+    Column("format", String(20), nullable=False),
+    Column("storage_bucket", String(255)),
+    Column("storage_key", String(1024)),
+    Column("generated_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+analyst_notes = Table(
+    "analyst_notes",
+    metadata,
+    Column("id", Uuid(), primary_key=True),
+    Column("case_id", Uuid(), nullable=False),
+    Column("evidence_id", Uuid()),
+    Column("analysis_job_id", Uuid()),
+    Column("created_by_id", Uuid()),
+    Column("body", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )

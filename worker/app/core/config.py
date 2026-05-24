@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     celery_broker_url: str = Field(default="redis://redis:6379/0", alias="CELERY_BROKER_URL")
     celery_result_backend: str = Field(default="redis://redis:6379/1", alias="CELERY_RESULT_BACKEND")
     rules_dir: str = Field(default="/rules", alias="RULES_DIR")
+    report_templates_dir: str = Field(default="/reports/templates", alias="REPORT_TEMPLATES_DIR")
 
     minio_endpoint: str = Field(default="minio:9000", alias="MINIO_ENDPOINT")
     minio_access_key: str = Field(default="change-me", alias="MINIO_ACCESS_KEY")

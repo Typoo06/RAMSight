@@ -84,6 +84,7 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       RULES_DIR: ${RULES_DIR:-/rules}
+      REPORT_TEMPLATES_DIR: ${REPORT_TEMPLATES_DIR:-/reports/templates}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-change-me}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me}
@@ -101,6 +102,7 @@ services:
       - ./worker:/app
       - ./tests:/tests
       - ./rules:/rules:ro
+      - ./reports/templates:/reports/templates:ro
       - volatility-symbols:${VOLATILITY_SYMBOL_PATH:-/opt/volatility/symbols}
     depends_on:
       postgres:

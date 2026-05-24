@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ report_title }}</title>
+  <style>
+    :root { color: #172026; background: #ffffff; font-family: Arial, sans-serif; }
+    body { margin: 32px; font-size: 13px; line-height: 1.45; }
+    h1, h2, h3 { color: #13212b; page-break-after: avoid; }
+    h1 { margin-bottom: 4px; font-size: 26px; }
+    h2 { margin-top: 28px; border-bottom: 1px solid #ccd5dc; padding-bottom: 4px; font-size: 18px; }
+    h3 { margin-top: 18px; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; table-layout: fixed; }
+    th, td { border: 1px solid #d8e0e6; padding: 6px 8px; vertical-align: top; word-break: break-word; }
+    th { background: #eef3f6; text-align: left; }
+    .muted { color: #5d6b75; }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .metric { border: 1px solid #d8e0e6; padding: 8px; }
+    .metric strong { display: block; font-size: 18px; }
+    .severity-critical { color: #8a1f11; font-weight: bold; }
+    .severity-high { color: #a14a00; font-weight: bold; }
+    .nowrap { white-space: nowrap; }
+    @media print { body { margin: 18mm; } a { color: inherit; text-decoration: none; } }
+  </style>
+</head>
+<body>
+  <h1>{{ report_title }}</h1>
+  <p class="muted">Report type: {{ report_type }} | Generated at: {{ generated_at }}</p>
+
+  <h2>Case Information</h2>
+  <table>
+    <tr><th>Case code</th><td>{{ case.case_code }}</td><th>Name</th><td>{{ case.name }}</td></tr>
+    <tr><th>Status</th><td>{{ case.status }}</td><th>Description</th><td>{{ case.description or "Not provided" }}</td></tr>
+  </table>
+
+  <h2>Evidence Metadata</h2>
+  <table>
+    <tr><th>Filename</th><td>{{ evidence.original_filename }}</td><th>Source type</th><td>{{ evidence.source_type }}</td></tr>
+    <tr><th>Size bytes</th><td>{{ evidence.size_bytes or "Unknown" }}</td><th>Acquisition tool</th><td>{{ evidence.acquisition_tool or "Unknown" }}</td></tr>
+    <tr><th>MD5</th><td>{{ evidence.md5 or "Unavailable" }}</td><th>SHA256</th><td>{{ evidence.sha256 or "Unavailable" }}</td></tr>
+    <tr><th>OS family</th><td>{{ evidence.os_family }}</td><th>OS version</th><td>{{ evidence.os_version or analysis_job.os_version or "Unknown" }}</td></tr>
+    <tr><th>Architecture</th><td>{{ evidence.architecture or analysis_job.architecture or "Unknown" }}</td><th>Kernel version</th><td>{{ evidence.kernel_version or analysis_job.kernel_version or "Unknown" }}</td></tr>
+    <tr><th>Symbol table</th><td colspan="3">{{ evidence.symbol_table or analysis_job.symbol_table or "Unknown" }}</td></tr>
+  </table>
+
+  <h2>Analysis Job</h2>
+  <table>
+    <tr><th>Job ID</th><td>{{ analysis_job.id }}</td><th>Status</th><td>{{ analysis_job.status }}</td></tr>
+    <tr><th>Plugin profile</th><td>{{ analysis_job.plugin_profile or "Default" }}</td><th>Duration ms</th><td>{{ analysis_job.duration_ms or "Unknown" }}</td></tr>
+    <tr><th>Started</th><td>{{ analysis_job.started_at or "Unknown" }}</td><th>Completed</th><td>{{ analysis_job.completed_at or "Unknown" }}</td></tr>
+  </table>
+
+  <h2>Analysis Summary</h2>
+  <div class="summary">
+    <div class="metric"><strong>{{ summary.total_plugin_results }}</strong>Total plugin results</div>
+    <div class="metric"><strong>{{ summary.completed_plugins }}</strong>Completed plugins</div>
+    <div class="metric"><strong>{{ summary.failed_plugins }}</strong>Failed plugins</div>
+    <div class="metric"><strong>{{ summary.total_parsed_artifacts }}</strong>Parsed artifacts</div>
+    <div class="metric"><strong>{{ summary.total_risk_findings }}</strong>Risk findings</div>
+    <div class="metric"><strong>{{ summary.total_ioc_records }}</strong>IOC records</div>
+  </div>
+
+  <h2>Top Suspicious Findings</h2>
+  {% if top_findings %}
+  <table>
+    <tr><th>Rule</th><th>Severity</th><th>Score</th><th>Artifact</th><th>Source plugin</th><th>Recommendation</th></tr>
+    {% for finding in top_findings %}
+    <tr>
+      <td>{{ finding.rule_name or finding.title }}</td>
+      <td class="severity-{{ finding.severity }}">{{ finding.severity }}</td>
+      <td>{{ finding.score }}</td>
+      <td>{{ finding.artifact_type or "N/A" }}</td>
+      <td>{{ finding.source_plugin or "N/A" }}</td>
+      <td>{{ finding.recommendation or "Review with surrounding forensic context." }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No risk findings were recorded.</p>{% endif %}
+
+  <h2>Suspicious Process Summary</h2>
+  {% if process_risk_summaries %}
+  <table>
+    <tr><th>Title</th><th>Severity</th><th>Score</th><th>Details</th></tr>
+    {% for finding in process_risk_summaries %}
+    <tr><td>{{ finding.title }}</td><td>{{ finding.severity }}</td><td>{{ finding.score }}</td><td>{{ finding.extra_data }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No process risk summary findings were recorded.</p>{% endif %}
+
+  <h2>Network Indicators</h2>
+  {% if network_indicators %}
+  <table>
+    <tr><th>Protocol</th><th>Local</th><th>Remote</th><th>State</th><th>PID</th><th>Process</th></tr>
+    {% for item in network_indicators %}
+    <tr><td>{{ item.protocol or "" }}</td><td>{{ item.local_address }}:{{ item.local_port }}</td><td>{{ item.remote_address }}:{{ item.remote_port }}</td><td>{{ item.state or "" }}</td><td>{{ item.pid or "" }}</td><td>{{ item.process_name or "" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No network artifacts are available for this report section.</p>{% endif %}
+
+  <h2>Suspicious Module Paths</h2>
+  {% if module_artifacts %}
+  <table>
+    <tr><th>Process</th><th>PID</th><th>Module</th><th>Path</th><th>Source plugin</th></tr>
+    {% for module in module_artifacts %}
+    <tr><td>{{ module.process_name or "" }}</td><td>{{ module.pid or "" }}</td><td>{{ module.module_name or "" }}</td><td>{{ module.module_path or "" }}</td><td>{{ module.source_plugin or "" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No suspicious module path artifacts were selected.</p>{% endif %}
+
+  <h2>Memory Region Findings</h2>
+  {% if memory_regions %}
+  <table>
+    <tr><th>Process</th><th>PID</th><th>Range</th><th>Protection</th><th>Executable</th><th>Source plugin</th></tr>
+    {% for region in memory_regions %}
+    <tr><td>{{ region.process_name or "" }}</td><td>{{ region.pid or "" }}</td><td>{{ region.start_address }} - {{ region.end_address }}</td><td>{{ region.protection or "" }}</td><td>{{ region.is_executable }}</td><td>{{ region.source_plugin or "" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No suspicious memory region artifacts were recorded.</p>{% endif %}
+
+  <h2>YARA Matches</h2>
+  {% if yara_matches %}
+  <table>
+    <tr><th>Rule</th><th>Namespace</th><th>Target</th><th>Offset</th><th>Source plugin</th></tr>
+    {% for match in yara_matches %}
+    <tr><td>{{ match.rule_name }}</td><td>{{ match.namespace or "" }}</td><td>{{ match.target_identifier or "" }}</td><td>{{ match.offset or "" }}</td><td>{{ match.source_plugin or "" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No YARA match artifacts were recorded.</p>{% endif %}
+
+  <h2>IOC Table</h2>
+  {% if iocs %}
+  <table>
+    <tr><th>Type</th><th>Value</th><th>Confidence</th><th>Source plugin</th><th>Context</th></tr>
+    {% for ioc in iocs %}
+    <tr><td>{{ ioc.ioc_type }}</td><td>{{ ioc.value }}</td><td>{{ ioc.confidence or "" }}</td><td>{{ ioc.source_plugin or "" }}</td><td>{{ ioc.context or "" }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No IOC records were extracted.</p>{% endif %}
+
+  <h2>Raw Plugin Output References</h2>
+  <table>
+    <tr><th>Plugin</th><th>Status</th><th>Raw bucket</th><th>Raw key</th><th>Parsed bucket</th><th>Parsed key</th></tr>
+    {% for plugin in plugin_results %}
+    <tr><td>{{ plugin.plugin_name }}</td><td>{{ plugin.status }}</td><td>{{ plugin.raw_output_bucket or "" }}</td><td>{{ plugin.raw_output_key or "" }}</td><td>{{ plugin.parsed_output_bucket or "" }}</td><td>{{ plugin.parsed_output_key or "" }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Incident Response Recommendations</h2>
+  <ul>
+    {% for recommendation in recommendations %}<li>{{ recommendation }}</li>{% endfor %}
+  </ul>
+
+  <h2>Analyst Notes</h2>
+  {% if analyst_notes %}
+  {% for note in analyst_notes %}<p>{{ note.body }}</p>{% endfor %}
+  {% else %}<p class="muted">No analyst notes were recorded at report generation time.</p>{% endif %}
+</body>
+</html>
