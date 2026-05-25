@@ -5,11 +5,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models import Base, Case, Evidence
+from app.models import AnalysisJob, Base, Case, Evidence
 from app.models.enums import EvidenceSourceType, OSFamily
 from app.schemas.analysis_job import AnalysisJobCreate
 from app.services.analysis_job_service import create_analysis_job
-from app.services.errors import ValidationError
+from app.services.errors import ServiceUnavailableError, ValidationError
+from app.services.job_dispatcher import AnalysisJobDispatchError
 
 
 class RecordingDispatcher:
@@ -18,6 +19,12 @@ class RecordingDispatcher:
 
     def dispatch(self, job_id) -> None:
         self.dispatched.append(job_id)
+
+
+class FailingDispatcher:
+
+    def dispatch(self, job_id) -> None:
+        raise AnalysisJobDispatchError("RAMSight could not queue the analysis job; verify Redis/Celery broker connectivity.")
 
 
 @pytest.fixture()
@@ -87,3 +94,18 @@ def test_reject_analysis_job_when_evidence_does_not_belong_to_case(db_session) -
             AnalysisJobCreate(case_id=other_case.id, evidence_id=evidence.id, os_family=OSFamily.WINDOWS.value),
             RecordingDispatcher(),
         )
+
+
+def test_dispatch_failure_marks_created_job_failed(db_session) -> None:
+    case, evidence = _create_case_and_evidence(db_session)
+
+    with pytest.raises(ServiceUnavailableError):
+        create_analysis_job(
+            db_session,
+            AnalysisJobCreate(case_id=case.id, evidence_id=evidence.id, os_family=OSFamily.WINDOWS.value),
+            FailingDispatcher(),
+        )
+
+    job = db_session.query(AnalysisJob).one()
+    assert job.status == "failed"
+    assert "RAMSight could not queue" in job.error_message

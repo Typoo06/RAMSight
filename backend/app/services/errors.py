@@ -15,3 +15,7 @@ class ConflictError(ServiceError):
 
 class ValidationError(ServiceError):
     pass
+
+
+class ServiceUnavailableError(ServiceError):
+    pass

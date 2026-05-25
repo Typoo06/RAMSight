@@ -15,7 +15,16 @@ class AnalysisJobDispatcher:
         self.celery_app = celery_app or celery_sender
 
     def dispatch(self, job_id: UUID) -> None:
-        self.celery_app.send_task(ANALYSIS_TASK_NAME, args=[str(job_id)])
+        try:
+            self.celery_app.send_task(ANALYSIS_TASK_NAME, args=[str(job_id)])
+        except Exception as exc:  # noqa: BLE001 - dispatch errors must be returned as safe API responses.
+            raise AnalysisJobDispatchError(
+                "RAMSight could not queue the analysis job; verify Redis/Celery broker connectivity."
+            ) from exc
+
+
+class AnalysisJobDispatchError(RuntimeError):
+    pass
 
 
 def get_analysis_job_dispatcher() -> AnalysisJobDispatcher:

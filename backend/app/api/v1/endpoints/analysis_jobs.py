@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.schemas.analysis_job import AnalysisJobCreate, AnalysisJobListResponse, AnalysisJobRead, AnalysisJobStatusRead
 from app.services import analysis_job_service
-from app.services.errors import NotFoundError, ValidationError
+from app.services.errors import NotFoundError, ServiceUnavailableError, ValidationError
 from app.services.job_dispatcher import AnalysisJobDispatcher, get_analysis_job_dispatcher
 
 router = APIRouter()
@@ -26,6 +26,8 @@ def create_analysis_job(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ServiceUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.get("", response_model=AnalysisJobListResponse)
