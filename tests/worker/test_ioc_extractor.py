@@ -13,10 +13,12 @@ from app.ioc.extractor import (
 )
 from app.ioc.types import (
     IOC_COMMAND_LINE,
+    IOC_FILE_PATH,
     IOC_IP_ADDRESS,
     IOC_MEMORY_REGION,
     IOC_MODULE_PATH,
     IOC_NETWORK_ENDPOINT,
+    IOC_PID,
     IOC_YARA_RULE,
 )
 
@@ -129,6 +131,25 @@ def test_suspicious_module_path_extracted_and_normal_system_module_ignored() -> 
     assert iocs_by_type(iocs, IOC_MODULE_PATH)[0].normalized_value == "c:/users/public/evil.dll"
 
 
+def test_placeholder_path_values_are_not_extracted_as_iocs() -> None:
+    module_id = uuid4()
+    process_id = uuid4()
+    artifacts = {
+        MODULE_TABLE: [
+            {"id": module_id, "module_name": "missing.dll", "module_path": "Disabled", "source_plugin": "windows.dlllist"}
+        ],
+        "process_artifacts": [
+            {"id": process_id, "pid": 500, "name": "lsass.exe", "image_path": "Not recorded", "source_plugin": "windows.pslist"}
+        ],
+    }
+    findings = [risk_finding(MODULE_TABLE, module_id), risk_finding("process_artifacts", process_id)]
+
+    iocs = extract_iocs(artifacts, findings, context())
+
+    assert iocs_by_type(iocs, IOC_MODULE_PATH) == []
+    assert iocs_by_type(iocs, IOC_FILE_PATH) == []
+
+
 def test_yara_rule_ioc_extraction() -> None:
     artifacts = {
         YARA_TABLE: [
@@ -176,6 +197,31 @@ def test_memory_region_ioc_extraction() -> None:
     assert iocs_by_type(iocs, IOC_MEMORY_REGION)[0].extra_data["is_executable"] is True
 
 
+def test_memory_region_ioc_uses_clear_fallback_without_unknown_unknown() -> None:
+    artifacts = {
+        MEMORY_REGION_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 1128,
+                "process_name": "NOTEPAD.exe",
+                "start_address": None,
+                "end_address": None,
+                "protection": "PAGE_EXECUTE_READWRITE",
+                "is_executable": True,
+                "is_private": True,
+                "source_plugin": "windows.malfind",
+            }
+        ]
+    }
+
+    iocs = extract_iocs(artifacts, [], context())
+
+    memory_ioc = iocs_by_type(iocs, IOC_MEMORY_REGION)[0]
+    assert memory_ioc.value == "pid:1128:malfind-region:1"
+    assert "unknown-unknown" not in memory_ioc.value
+    assert memory_ioc.extra_data["region_index"] == 1
+
+
 def test_risk_finding_id_linkage_and_pid_context() -> None:
     artifact_id = uuid4()
     finding = risk_finding("process_artifacts", artifact_id, severity="high")
@@ -213,3 +259,19 @@ def test_deduplication_by_type_value_and_source_plugin() -> None:
 
     assert len(iocs_by_type(iocs, IOC_IP_ADDRESS)) == 1
     assert len(iocs_by_type(iocs, IOC_NETWORK_ENDPOINT)) == 1
+
+
+def test_pid_iocs_deduplicate_across_pslist_and_psscan_sources() -> None:
+    pslist_id = uuid4()
+    psscan_id = uuid4()
+    artifacts = {
+        "process_artifacts": [
+            {"id": pslist_id, "pid": 777, "name": "odd.exe", "source_plugin": "windows.pslist"},
+            {"id": psscan_id, "pid": 777, "name": "odd.exe", "source_plugin": "windows.psscan"},
+        ]
+    }
+    findings = [risk_finding("process_artifacts", pslist_id), risk_finding("process_artifacts", psscan_id)]
+
+    iocs = extract_iocs(artifacts, findings, context())
+
+    assert len(iocs_by_type(iocs, IOC_PID)) == 1

@@ -22,6 +22,7 @@ from app.ioc.types import (
     IOC_YARA_RULE,
     IOCRecordDraft,
 )
+from app.parsers.common import is_path_like, is_placeholder_value
 
 PROCESS_TABLE = "process_artifacts"
 NETWORK_TABLE = "network_artifacts"
@@ -130,7 +131,7 @@ def make_ioc(
     extra_data: dict,
     risk_finding_id: UUID | None = None,
 ) -> IOCRecordDraft | None:
-    if value in (None, ""):
+    if is_placeholder_value(value):
         return None
     value_text = str(value)
     os_family = (context.get("os_family") or "unknown").lower()
@@ -261,7 +262,7 @@ def extract_command_iocs(rows: list[dict], risk_index: dict[tuple[str, str], lis
 
 
 def is_suspicious_path(path: str | None, os_family: str | None) -> tuple[bool, str | None]:
-    if not path:
+    if not is_path_like(path, os_family):
         return False, None
     normalized = normalize_path(path, os_family)
     for fragment in sorted(USER_WRITABLE_PATH_FRAGMENTS):
@@ -276,6 +277,8 @@ def extract_module_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list
         findings = linked_findings(risk_index, MODULE_TABLE, row)
         suspicious, reason = is_suspicious_path(row.get("module_path"), context.get("os_family"))
         if not suspicious and not findings:
+            continue
+        if not is_path_like(row.get("module_path"), context.get("os_family")):
             continue
         severity = severity_from_findings(findings, "medium")
         append_if_present(
@@ -324,20 +327,21 @@ def extract_process_iocs(rows: list[dict], risk_index: dict[tuple[str, str], lis
                 first_finding_id(findings),
             ),
         )
-        append_if_present(
-            iocs,
-            make_ioc(
-                context,
-                IOC_PID,
-                row.get("pid"),
-                row.get("source_plugin"),
-                min(confidence_for_severity(severity, 60), 70),
-                "contextual PID linked to suspicious process evidence",
-                process_extra(row, severity, matched_reason),
-                first_finding_id(findings),
-            ),
-        )
-        if row.get("image_path") and (suspicious_path or findings):
+        if findings or hidden_candidate:
+            append_if_present(
+                iocs,
+                make_ioc(
+                    context,
+                    IOC_PID,
+                    row.get("pid"),
+                    row.get("source_plugin"),
+                    min(confidence_for_severity(severity, 60), 70),
+                    "contextual PID linked to concrete suspicious process evidence",
+                    process_extra(row, severity, matched_reason),
+                    first_finding_id(findings),
+                ),
+            )
+        if is_path_like(row.get("image_path"), context.get("os_family")) and (suspicious_path or findings):
             append_if_present(
                 iocs,
                 make_ioc(
@@ -352,6 +356,17 @@ def extract_process_iocs(rows: list[dict], risk_index: dict[tuple[str, str], lis
                 ),
             )
     return iocs
+
+
+def memory_region_value(row: dict, index: int) -> str:
+    pid = row.get("pid")
+    start = row.get("start_address")
+    end = row.get("end_address")
+    if start and end:
+        return f"{pid}:{start}-{end}"
+    if pid is not None:
+        return f"pid:{pid}:malfind-region:{index}"
+    return f"malfind-region:{index}"
 
 
 def process_extra(row: dict, severity: str, matched_reason: str) -> dict:
@@ -397,14 +412,12 @@ def extract_yara_iocs(rows: list[dict], context: dict) -> list[IOCRecordDraft]:
 
 def extract_memory_region_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
     iocs = []
-    for row in rows:
+    for index, row in enumerate(rows, start=1):
         findings = linked_findings(risk_index, MEMORY_REGION_TABLE, row)
         suspicious = bool(row.get("is_executable")) or row.get("source_plugin") in {"windows.malfind", "linux.vmayarascan"}
         if not suspicious and not findings:
             continue
-        start = row.get("start_address") or "unknown"
-        end = row.get("end_address") or "unknown"
-        value = f"{row.get('pid')}:{start}-{end}"
+        value = memory_region_value(row, index)
         severity = severity_from_findings(findings, "high" if suspicious else "medium")
         append_if_present(
             iocs,
@@ -426,6 +439,7 @@ def extract_memory_region_iocs(rows: list[dict], risk_index: dict[tuple[str, str
                     "description": row.get("description"),
                     "is_executable": row.get("is_executable"),
                     "is_private": row.get("is_private"),
+                    "region_index": index,
                     "source_plugin": row.get("source_plugin"),
                 },
                 first_finding_id(findings),

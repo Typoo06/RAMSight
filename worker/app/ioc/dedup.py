@@ -64,7 +64,8 @@ def deduplicate_iocs(iocs: list[IOCRecordDraft]) -> list[IOCRecordDraft]:
     for ioc in iocs:
         normalized_value = ioc.normalized_value or normalize_ioc_value(ioc.ioc_type, ioc.value, ioc.os_family)
         normalized = replace(ioc, normalized_value=normalized_value)
-        key = (normalized.analysis_job_id, normalized.ioc_type, normalized.normalized_value, normalized.source_plugin or "")
+        source_plugin = "" if normalized.ioc_type == IOC_PID else normalized.source_plugin or ""
+        key = (normalized.analysis_job_id, normalized.ioc_type, normalized.normalized_value, source_plugin)
         existing = best.get(key)
         if existing is None or (normalized.confidence or 0) > (existing.confidence or 0):
             best[key] = normalized

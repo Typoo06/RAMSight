@@ -14,7 +14,7 @@ from app.detection.engine import (
     is_public_remote_address,
 )
 from app.detection.loader import load_detection_rules, load_risk_scoring_config
-from app.detection.rules import applies_to_os
+from app.detection.rules import FindingDraft, applies_to_os
 from app.detection.scoring import build_process_risk_summaries
 
 
@@ -43,7 +43,7 @@ def test_rules_loader_and_os_scope_filtering() -> None:
     assert scoring["severity_scores"]["high"] == 8
 
 
-def test_system_process_wrong_path_is_case_insensitive_and_skips_missing_path() -> None:
+def test_system_process_wrong_path_is_case_insensitive_and_skips_missing_or_placeholder_path() -> None:
     artifacts = {
         PROCESS_TABLE: [
             {
@@ -60,6 +60,13 @@ def test_system_process_wrong_path_is_case_insensitive_and_skips_missing_path() 
                 "image_path": None,
                 "source_plugin": "windows.pslist",
             },
+            {
+                "id": uuid4(),
+                "pid": 502,
+                "name": "lsass.exe",
+                "image_path": "Disabled",
+                "source_plugin": "windows.pslist",
+            },
         ]
     }
 
@@ -68,6 +75,20 @@ def test_system_process_wrong_path_is_case_insensitive_and_skips_missing_path() 
     assert len(findings) == 1
     assert findings[0].rule_id == "WIN_SYSTEM_PROCESS_WRONG_PATH"
     assert findings[0].extra_data["pid"] == 500
+
+
+def test_system_process_wrong_path_only_applies_to_known_system_processes() -> None:
+    artifacts = {
+        PROCESS_TABLE: [
+            {"id": uuid4(), "pid": 600, "name": "DumpIt.exe", "image_path": "C:\\Users\\Public\\DumpIt.exe"},
+            {"id": uuid4(), "pid": 601, "name": "WinRAR.exe", "image_path": "C:\\Users\\lab\\Downloads\\WinRAR.exe"},
+            {"id": uuid4(), "pid": 602, "name": "explorer.exe", "image_path": "C:\\Windows\\explorer.exe"},
+        ]
+    }
+
+    findings = evaluate_rules([rule_by_id("WIN_SYSTEM_PROCESS_WRONG_PATH")], artifacts, context())
+
+    assert findings == []
 
 
 def test_encoded_powershell_forms_and_long_base64() -> None:
@@ -123,7 +144,8 @@ def test_memory_region_finding_uses_cautious_wording() -> None:
     findings = evaluate_rules([rule_by_id("SUSPICIOUS_EXECUTABLE_MEMORY_REGION")], artifacts, context())
 
     assert len(findings) == 1
-    assert "not confirmed injection" in findings[0].description
+    assert "injection candidate" in findings[0].description
+    assert "requires analyst validation" in findings[0].description
     assert findings[0].extra_data["is_executable"] is True
 
 
@@ -168,27 +190,54 @@ def test_psscan_only_hidden_process_candidate_compares_by_pid() -> None:
     assert findings[0].extra_data["pid"] == 777
 
 
-def test_process_risk_aggregation_creates_summary_finding() -> None:
+def test_process_risk_aggregation_creates_summary_finding_with_identity() -> None:
     artifacts = {
         PROCESS_TABLE: [
-            {"id": uuid4(), "pid": 777, "name": "lsass.exe", "image_path": "C:\\Temp\\lsass.exe", "source_plugin": "windows.pslist"},
-            {"id": uuid4(), "pid": 4, "name": "System", "source_plugin": "windows.pslist"},
-            {"id": uuid4(), "pid": 777, "name": "lsass.exe", "source_plugin": "windows.psscan"},
-        ],
-        COMMAND_TABLE: [
             {
                 "id": uuid4(),
                 "pid": 777,
-                "process_name": "powershell.exe",
-                "command": "powershell.exe -enc " + "SQBFAFgA" * 8,
+                "name": "lsass.exe",
+                "image_path": "C:\\Temp\\lsass.exe",
+                "source_plugin": "windows.psscan",
             }
         ],
     }
-    rules = [rule_by_id("WIN_SYSTEM_PROCESS_WRONG_PATH"), rule_by_id("WIN_ENCODED_POWERSHELL")]
+    rules = [rule_by_id("WIN_SYSTEM_PROCESS_WRONG_PATH"), rule_by_id("WIN_PSSCAN_ONLY_PROCESS")]
     findings = evaluate_rules(rules, artifacts, context())
     summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
 
     assert len(summaries) == 1
     assert summaries[0].rule_id == "PROCESS_RISK_SUMMARY"
     assert summaries[0].extra_data["total_score"] == 16
-    assert set(summaries[0].extra_data["component_rule_ids"]) == {"WIN_SYSTEM_PROCESS_WRONG_PATH", "WIN_ENCODED_POWERSHELL"}
+    assert "lsass.exe" in summaries[0].title
+    assert summaries[0].extra_data["pid"] == 777
+    assert summaries[0].extra_data["process_name"] == "lsass.exe"
+    assert set(summaries[0].extra_data["component_rule_ids"]) == {"WIN_SYSTEM_PROCESS_WRONG_PATH", "WIN_PSSCAN_ONLY_PROCESS"}
+
+
+def test_process_risk_aggregation_deduplicates_repeated_components() -> None:
+    ctx = context()
+    first = FindingDraft(
+        analysis_job_id=ctx["analysis_job_id"],
+        evidence_id=ctx["evidence_id"],
+        plugin_result_id=None,
+        os_family="windows",
+        os_scope="windows",
+        source_plugin="windows.pslist",
+        rule_id="WIN_SYSTEM_PROCESS_WRONG_PATH",
+        rule_name="System process running from wrong path",
+        category="process",
+        severity="high",
+        score=8,
+        title="System process path anomaly: lsass.exe (PID 777)",
+        description="test",
+        artifact_type=PROCESS_TABLE,
+        artifact_id="one",
+        recommendation="test",
+        extra_data={"pid": 777, "process_name": "lsass.exe", "image_path": "C:\\Temp\\lsass.exe"},
+    )
+    duplicate = FindingDraft(**{**first.__dict__, "id": uuid4(), "artifact_id": "two"})
+
+    summaries = build_process_risk_summaries([first, duplicate], load_risk_scoring_config(rules_dir()))
+
+    assert summaries == []

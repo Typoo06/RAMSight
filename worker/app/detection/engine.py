@@ -8,6 +8,7 @@ import re
 from collections.abc import Iterable
 
 from app.detection.rules import DetectionRule, FindingDraft, applies_to_os
+from app.parsers.common import is_path_like
 
 PROCESS_TABLE = "process_artifacts"
 NETWORK_TABLE = "network_artifacts"
@@ -19,6 +20,20 @@ YARA_TABLE = "yara_matches"
 BASE64_TOKEN_RE = re.compile(r"^[A-Za-z0-9+/]{40,}={0,2}$")
 ENCODED_FLAG_RE = re.compile(r"(^|\s)([-/](?:enc|encodedcommand))(?=$|\s|:)", re.IGNORECASE)
 LOGGER = logging.getLogger(__name__)
+KNOWN_WINDOWS_SYSTEM_PROCESSES = {
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "services.exe",
+    "lsass.exe",
+    "lsm.exe",
+    "svchost.exe",
+    "explorer.exe",
+}
+DEFAULT_WINDOWS_SYSTEM_PATHS = {
+    "explorer.exe": ["C:/Windows/"],
+}
 
 
 def normalize_process_name(value: str | None) -> str:
@@ -30,6 +45,14 @@ def normalize_path(value: str | None, os_family: str | None = None) -> str:
     if os_family == "windows":
         normalized = normalized.lower()
     return normalized
+
+
+def process_identity(artifact: dict) -> str:
+    name = artifact.get("name") or artifact.get("process_name") or "unknown process"
+    pid = artifact.get("pid")
+    if pid is not None:
+        return f"{name} (PID {pid})"
+    return str(name)
 
 
 def is_public_remote_address(value: str | None) -> bool:
@@ -130,32 +153,41 @@ def process_extra(artifact: dict) -> dict:
         "pid": artifact.get("pid"),
         "ppid": artifact.get("ppid"),
         "process_name": artifact.get("name") or artifact.get("process_name"),
+        "image_path": artifact.get("image_path"),
+        "command_line": artifact.get("command_line"),
         "source_plugin": artifact.get("source_plugin"),
     }
 
 
 def evaluate_system_process_wrong_path(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
     os_family = (context.get("os_family") or "unknown").lower()
-    process_names = {normalize_process_name(name) for name in rule.match.get("process_names") or []}
+    configured_names = {normalize_process_name(name) for name in rule.match.get("process_names") or []}
+    process_names = (configured_names or KNOWN_WINDOWS_SYSTEM_PROCESSES) & KNOWN_WINDOWS_SYSTEM_PROCESSES
     expected_paths = [normalize_path(path, os_family) for path in rule.match.get("expected_paths") or []]
     findings = []
+    seen = set()
     for artifact in artifacts.get(PROCESS_TABLE, []):
         name = normalize_process_name(artifact.get("name"))
         image_path = artifact.get("image_path")
-        if name not in process_names or not image_path:
+        if name not in process_names or not is_path_like(image_path, os_family):
             continue
+        paths_for_process = [normalize_path(path, os_family) for path in DEFAULT_WINDOWS_SYSTEM_PATHS.get(name, [])] or expected_paths
         normalized_path = normalize_path(image_path, os_family)
-        if any(normalized_path.startswith(expected_path) for expected_path in expected_paths):
+        if any(normalized_path.startswith(expected_path) for expected_path in paths_for_process):
             continue
+        dedupe_key = (name, artifact.get("pid"), normalized_path)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         findings.append(
             make_finding(
                 rule,
                 context,
                 artifact,
-                "System process running from unexpected path",
-                f"{artifact.get('name')} is running from a path outside the expected system directory.",
+                f"System process path anomaly: {process_identity(artifact)}",
+                f"{process_identity(artifact)} is running from {image_path}, outside the expected system directory.",
                 PROCESS_TABLE,
-                {**process_extra(artifact), "image_path": image_path, "expected_paths": expected_paths},
+                {**process_extra(artifact), "image_path": image_path, "expected_paths": paths_for_process},
             )
         )
     return findings
@@ -178,8 +210,8 @@ def evaluate_suspicious_parent_child(rule: DetectionRule, artifacts: dict[str, l
                 rule,
                 context,
                 artifact,
-                "Suspicious parent-child process relationship",
-                f"{parent.get('name')} spawned {artifact.get('name')}, which matches a suspicious relationship rule.",
+                f"Suspicious parent-child relationship: {parent.get('name')} -> {artifact.get('name')}",
+                f"{parent.get('name')} spawned {process_identity(artifact)}, matching a suspicious relationship rule.",
                 PROCESS_TABLE,
                 {**process_extra(artifact), "parent_pid": parent.get("pid"), "parent_name": parent.get("name")},
             )
@@ -201,8 +233,8 @@ def evaluate_psscan_only_process(rule: DetectionRule, artifacts: dict[str, list[
                 rule,
                 context,
                 artifact,
-                "Hidden process candidate from psscan",
-                "A process appears in psscan but not pslist by PID; treat this as a hidden process candidate.",
+                f"Hidden process candidate: {process_identity(artifact)}",
+                f"{process_identity(artifact)} appears in psscan but not pslist by PID; treat this as a hidden process candidate.",
                 PROCESS_TABLE,
                 process_extra(artifact),
             )
@@ -283,19 +315,26 @@ def evaluate_suspicious_module_path(rule: DetectionRule, artifacts: dict[str, li
     os_family = (context.get("os_family") or "unknown").lower()
     fragments = [normalize_path(fragment, os_family) for fragment in rule.match.get("suspicious_path_fragments") or []]
     findings = []
+    seen = set()
     for artifact in artifacts.get(MODULE_TABLE, []):
         module_path = artifact.get("module_path")
+        if not is_path_like(module_path, os_family):
+            continue
         normalized_path = normalize_path(module_path, os_family)
         matched = [fragment for fragment in fragments if fragment in normalized_path]
         if not matched:
             continue
+        dedupe_key = (artifact.get("pid"), normalize_process_name(artifact.get("process_name")), normalized_path)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         findings.append(
             make_finding(
                 rule,
                 context,
                 artifact,
-                "Suspicious module path",
-                "A loaded module is mapped from a temporary or user-writable path.",
+                f"Suspicious module path in {process_identity(artifact)}",
+                f"A loaded module is mapped from a temporary or user-writable path: {module_path}.",
                 MODULE_TABLE,
                 {
                     "pid": artifact.get("pid"),
@@ -312,18 +351,26 @@ def evaluate_suspicious_module_path(rule: DetectionRule, artifacts: dict[str, li
 def evaluate_memory_regions(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
     source_plugins = set(rule.match.get("source_plugins") or [])
     findings = []
+    seen = set()
     for artifact in artifacts.get(MEMORY_REGION_TABLE, []):
         if source_plugins and artifact.get("source_plugin") not in source_plugins:
             continue
         if not artifact.get("is_executable") and artifact.get("source_plugin") != "windows.malfind":
             continue
+        start = artifact.get("start_address")
+        end = artifact.get("end_address")
+        region_label = f"{start}-{end}" if start and end else "address unavailable"
+        dedupe_key = (artifact.get("pid"), artifact.get("source_plugin"), start, end, artifact.get("protection"))
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         findings.append(
             make_finding(
                 rule,
                 context,
                 artifact,
-                "Suspicious executable memory region",
-                "A malfind-like plugin reported a suspicious executable memory region; this is not confirmed injection.",
+                f"Suspicious executable memory region in {process_identity(artifact)}",
+                f"A malfind-like plugin reported a suspicious executable memory region ({region_label}); this is an injection candidate and requires analyst validation.",
                 MEMORY_REGION_TABLE,
                 {
                     "pid": artifact.get("pid"),

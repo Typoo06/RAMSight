@@ -17,7 +17,9 @@ rules:
         - winlogon.exe
         - services.exe
         - lsass.exe
+        - lsm.exe
         - svchost.exe
+        - explorer.exe
       expected_paths:
         - "C:\\Windows\\System32\\"
         - "C:/Windows/System32/"
