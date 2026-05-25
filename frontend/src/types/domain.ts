@@ -13,13 +13,16 @@ export interface Case {
 export interface Evidence {
   id: string;
   case_id: string;
+  uploaded_by_id: string | null;
   source_type: string;
   original_filename: string;
+  content_type: string | null;
   size_bytes: number | null;
   md5: string | null;
   sha256: string | null;
   storage_bucket: string | null;
   storage_key: string | null;
+  local_path: string | null;
   os_family: OSFamily;
   os_version: string | null;
   architecture: string | null;
@@ -35,6 +38,7 @@ export interface AnalysisJob {
   id: string;
   case_id: string;
   evidence_id: string;
+  created_by_id: string | null;
   status: string;
   os_family: OSFamily;
   os_version: string | null;
@@ -48,6 +52,16 @@ export interface AnalysisJob {
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+export interface AnalysisJobStatus {
+  id: string;
+  status: string;
+  error_message: string | null;
+  duration_ms: number | null;
+  started_at: string | null;
+  completed_at: string | null;
   updated_at: string;
 }
 
