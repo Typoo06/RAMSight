@@ -25,6 +25,7 @@ a { color: inherit; }
 .eyebrow { display: block; color: #63717d; font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
 .content { padding: 28px; }
 .page-stack { display: grid; gap: 18px; }
+.compact-stack { gap: 12px; }
 .narrow-page { max-width: 760px; }
 .page-heading h2 { margin: 4px 0 6px; font-size: 24px; }
 .page-heading p { margin: 0; color: #63717d; }
@@ -35,6 +36,7 @@ a { color: inherit; }
 .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .card h2 { margin: 0; font-size: 16px; }
 .card p { margin-top: 0; }
+.metric-value { font-size: 28px; font-weight: 800; margin: 0 0 4px; }
 .button { border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-weight: 700; padding: 9px 12px; }
 .button:disabled { cursor: not-allowed; opacity: 0.65; }
 .button-primary { background: #196b78; color: #ffffff; }
@@ -54,6 +56,7 @@ a { color: inherit; }
 .table caption { color: #63717d; margin-bottom: 8px; text-align: left; }
 .table th, .table td { border-bottom: 1px solid #e2e8ed; padding: 10px; text-align: left; vertical-align: top; }
 .table th { color: #4d5d68; font-size: 12px; text-transform: uppercase; }
+.table-subtext { color: #63717d; display: block; font-size: 13px; margin-top: 4px; }
 .state { background: #ffffff; border: 1px solid #dce3e8; border-radius: 8px; padding: 16px; }
 .state-error { border-color: #f0b8b2; color: #7b1f16; display: grid; gap: 4px; }
 .state-loading { color: #4d5d68; }

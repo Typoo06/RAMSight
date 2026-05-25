@@ -1,19 +1,48 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAnalysisJob, getAnalysisJobStatus } from "../api/analysisJobs";
+import { listIOCs } from "../api/iocs";
+import { listReports } from "../api/reports";
+import { listRiskFindings } from "../api/riskFindings";
+import { FindingTable } from "../components/results/FindingTable";
+import { IocTable } from "../components/results/IocTable";
+import { ReportSection } from "../components/results/ReportSection";
+import { ResultSection } from "../components/results/ResultSection";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
-import type { AnalysisJob } from "../types/domain";
+import type { AnalysisJob, IOC, Report, RiskFinding } from "../types/domain";
 import { displayValue, formatDateTime } from "../utils/format";
+import {
+  isMemoryRegionFinding,
+  isMemoryRegionIOC,
+  isModuleOrPathFinding,
+  isModuleOrPathIOC,
+  isNetworkFinding,
+  isNetworkIOC,
+  isProcessRiskSummary,
+  isYaraFinding,
+  isYaraIOC,
+  severityRank,
+  sortFindingsByRisk,
+} from "../utils/results";
 import { isActiveJobStatus, statusTone } from "../utils/status";
 
 export function AnalysisJobStatusPage() {
   const { caseId, jobId } = useParams();
   const [error, setError] = useState<string | null>(null);
+  const [findingError, setFindingError] = useState<string | null>(null);
+  const [findingLoading, setFindingLoading] = useState(true);
+  const [findings, setFindings] = useState<RiskFinding[]>([]);
+  const [iocError, setIocError] = useState<string | null>(null);
+  const [iocLoading, setIocLoading] = useState(true);
+  const [iocs, setIocs] = useState<IOC[]>([]);
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(true);
+  const [reports, setReports] = useState<Report[]>([]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -28,6 +57,48 @@ export function AnalysisJobStatusPage() {
       .finally(() => {
         if (active) setLoading(false);
       });
+    return () => {
+      active = false;
+    };
+  }, [jobId]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    let active = true;
+
+    listRiskFindings({ job_id: jobId, limit: 500 })
+      .then((response) => {
+        if (active) setFindings(response.items);
+      })
+      .catch((err: unknown) => {
+        if (active) setFindingError(err instanceof Error ? err.message : "RAMSight could not load risk findings.");
+      })
+      .finally(() => {
+        if (active) setFindingLoading(false);
+      });
+
+    listIOCs({ job_id: jobId, limit: 500 })
+      .then((response) => {
+        if (active) setIocs(response.items);
+      })
+      .catch((err: unknown) => {
+        if (active) setIocError(err instanceof Error ? err.message : "RAMSight could not load IOC records.");
+      })
+      .finally(() => {
+        if (active) setIocLoading(false);
+      });
+
+    listReports({ job_id: jobId, limit: 100 })
+      .then((response) => {
+        if (active) setReports(response.items.filter((report) => report.format === "html"));
+      })
+      .catch((err: unknown) => {
+        if (active) setReportError(err instanceof Error ? err.message : "RAMSight could not load report metadata.");
+      })
+      .finally(() => {
+        if (active) setReportLoading(false);
+      });
+
     return () => {
       active = false;
     };
@@ -51,6 +122,21 @@ export function AnalysisJobStatusPage() {
     };
   }, [job?.id, job?.status]);
 
+  const sortedFindings = useMemo(() => sortFindingsByRisk(findings), [findings]);
+  const highPriorityFindings = useMemo(
+    () => sortedFindings.filter((finding) => severityRank(finding.severity) >= severityRank("high")),
+    [sortedFindings],
+  );
+  const processRiskSummaries = useMemo(() => sortedFindings.filter(isProcessRiskSummary), [sortedFindings]);
+  const networkFindings = useMemo(() => sortedFindings.filter(isNetworkFinding), [sortedFindings]);
+  const moduleFindings = useMemo(() => sortedFindings.filter(isModuleOrPathFinding), [sortedFindings]);
+  const memoryFindings = useMemo(() => sortedFindings.filter(isMemoryRegionFinding), [sortedFindings]);
+  const yaraFindings = useMemo(() => sortedFindings.filter(isYaraFinding), [sortedFindings]);
+  const networkIocs = useMemo(() => iocs.filter(isNetworkIOC), [iocs]);
+  const moduleIocs = useMemo(() => iocs.filter(isModuleOrPathIOC), [iocs]);
+  const memoryIocs = useMemo(() => iocs.filter(isMemoryRegionIOC), [iocs]);
+  const yaraIocs = useMemo(() => iocs.filter(isYaraIOC), [iocs]);
+
   if (!caseId || !jobId) return <ErrorState message="RAMSight could not identify the requested analysis job." />;
   if (loading) return <LoadingState label="Loading RAMSight analysis job..." />;
   if (error && !job) return <ErrorState message={error} />;
@@ -60,7 +146,7 @@ export function AnalysisJobStatusPage() {
     <div className="page-stack">
       <section className="page-heading page-heading-row">
         <div>
-          <span className="eyebrow">Analysis status</span>
+          <span className="eyebrow">Analysis results</span>
           <h2>RAMSight job monitor</h2>
           <p>{job.id}</p>
         </div>
@@ -93,6 +179,108 @@ export function AnalysisJobStatusPage() {
           </dl>
         </Card>
       </div>
+
+      <div className="dashboard-grid">
+        <Card title="Findings"><p className="metric-value">{findings.length}</p><p className="muted">Total RAMSight findings</p></Card>
+        <Card title="High priority"><p className="metric-value">{highPriorityFindings.length}</p><p className="muted">High or critical findings</p></Card>
+        <Card title="Indicators"><p className="metric-value">{iocs.length}</p><p className="muted">Extracted IOC records</p></Card>
+      </div>
+
+      <ResultSection
+        title="Top suspicious findings"
+        loading={findingLoading}
+        error={findingError}
+        empty={sortedFindings.length === 0}
+        emptyMessage="RAMSight has no risk findings for this job yet."
+      >
+        <FindingTable caption="Critical and high findings are shown first" findings={sortedFindings} limit={20} />
+      </ResultSection>
+
+      <ResultSection
+        title="Process risk summary"
+        loading={findingLoading}
+        error={findingError}
+        empty={processRiskSummaries.length === 0}
+        emptyMessage="No process risk summary findings are available for this job."
+      >
+        <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={20} />
+      </ResultSection>
+
+      <ResultSection
+        title="Network indicators"
+        loading={findingLoading || iocLoading}
+        error={findingError || iocError}
+        empty={networkFindings.length === 0 && networkIocs.length === 0}
+        emptyMessage="No network findings or network IOC records are available for this job."
+      >
+        <div className="page-stack compact-stack">
+          {networkFindings.length > 0 && <FindingTable caption="Network-related findings" findings={networkFindings} limit={20} />}
+          {networkIocs.length > 0 && <IocTable caption="Network IOC records" iocs={networkIocs} limit={50} />}
+        </div>
+      </ResultSection>
+
+      <ResultSection
+        title="Suspicious module and path indicators"
+        loading={findingLoading || iocLoading}
+        error={findingError || iocError}
+        empty={moduleFindings.length === 0 && moduleIocs.length === 0}
+        emptyMessage="No suspicious module or path indicators are available through the current APIs."
+      >
+        <div className="page-stack compact-stack">
+          {moduleFindings.length > 0 && <FindingTable caption="Module/path findings" findings={moduleFindings} limit={20} />}
+          {moduleIocs.length > 0 && <IocTable caption="Module/path IOC records" iocs={moduleIocs} limit={50} />}
+        </div>
+      </ResultSection>
+
+      <ResultSection
+        title="Memory region findings"
+        loading={findingLoading || iocLoading}
+        error={findingError || iocError}
+        empty={memoryFindings.length === 0 && memoryIocs.length === 0}
+        emptyMessage="No memory region findings are available for this job."
+      >
+        <div className="page-stack compact-stack">
+          {memoryFindings.length > 0 && <FindingTable caption="Memory region findings" findings={memoryFindings} limit={20} />}
+          {memoryIocs.length > 0 && <IocTable caption="Memory region IOC records" iocs={memoryIocs} limit={50} />}
+        </div>
+      </ResultSection>
+
+      <ResultSection
+        title="YARA matches"
+        loading={findingLoading || iocLoading}
+        error={findingError || iocError}
+        empty={yaraFindings.length === 0 && yaraIocs.length === 0}
+        emptyMessage="No YARA findings or YARA IOC records are available for this job."
+      >
+        <div className="page-stack compact-stack">
+          {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={20} />}
+          {yaraIocs.length > 0 && <IocTable caption="YARA IOC records" iocs={yaraIocs} limit={50} />}
+        </div>
+      </ResultSection>
+
+      <ResultSection
+        title="IOC table"
+        loading={iocLoading}
+        error={iocError}
+        empty={iocs.length === 0}
+        emptyMessage="RAMSight has no IOC records for this job yet."
+      >
+        <IocTable caption="All IOC records for this analysis job" iocs={iocs} limit={100} />
+      </ResultSection>
+
+      <ResultSection
+        title="HTML reports"
+        loading={reportLoading}
+        error={reportError}
+        empty={reports.length === 0}
+        emptyMessage="No HTML report metadata is available for this job yet."
+      >
+        <ReportSection reports={reports} />
+      </ResultSection>
+
+      <Card title="Plugin and artifact references">
+        <p className="muted">Plugin result rows, raw output references, parsed output references, and normalized artifact tables need dedicated backend query endpoints before RAMSight can render them here. No placeholder data is shown.</p>
+      </Card>
 
       <Card title="Current workflow">
         <ol className="timeline-list">
