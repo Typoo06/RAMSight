@@ -29,6 +29,20 @@ import {
 } from "../utils/results";
 import { isActiveJobStatus, statusTone } from "../utils/status";
 
+function terminalResultEmptyMessage(jobStatus: string, completedMessage: string): string {
+  const normalized = jobStatus.toLowerCase();
+  if (isActiveJobStatus(jobStatus)) {
+    return "RAMSight is still running this analysis. Results will appear as the worker finishes each stage.";
+  }
+  if (normalized === "failed") {
+    return "This analysis failed before RAMSight produced records for this section. Review the job error and worker logs for the root cause.";
+  }
+  if (normalized === "cancelled" || normalized === "canceled") {
+    return "This analysis was cancelled before records were produced for this section.";
+  }
+  return completedMessage;
+}
+
 export function AnalysisJobStatusPage() {
   const { caseId, jobId } = useParams();
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +75,41 @@ export function AnalysisJobStatusPage() {
       active = false;
     };
   }, [jobId]);
+
+  useEffect(() => {
+    if (!jobId || !job || isActiveJobStatus(job.status)) return;
+    let active = true;
+
+    Promise.allSettled([
+      listRiskFindings({ job_id: jobId, limit: 500 }),
+      listIOCs({ job_id: jobId, limit: 500 }),
+      listReports({ job_id: jobId, limit: 100 }),
+    ]).then(([findingResult, iocResult, reportResult]) => {
+      if (!active) return;
+
+      if (findingResult.status === "fulfilled") {
+        setFindings(findingResult.value.items);
+      } else {
+        setFindingError(findingResult.reason instanceof Error ? findingResult.reason.message : "RAMSight could not refresh risk findings.");
+      }
+
+      if (iocResult.status === "fulfilled") {
+        setIocs(iocResult.value.items);
+      } else {
+        setIocError(iocResult.reason instanceof Error ? iocResult.reason.message : "RAMSight could not refresh IOC records.");
+      }
+
+      if (reportResult.status === "fulfilled") {
+        setReports(reportResult.value.items.filter((report) => report.format === "html"));
+      } else {
+        setReportError(reportResult.reason instanceof Error ? reportResult.reason.message : "RAMSight could not refresh report metadata.");
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [jobId, job]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -180,6 +229,13 @@ export function AnalysisJobStatusPage() {
         </Card>
       </div>
 
+      {job.status.toLowerCase() === "failed" && (
+        <Card className="status-callout status-callout-danger" title="Analysis failed">
+          <p>{job.error_message || "RAMSight marked this job failed, but no detailed error message was recorded."}</p>
+          <p className="muted">The case and evidence metadata are still available. Result sections below may be empty if the worker failed before parsing, detection, IOC extraction, or report generation completed.</p>
+        </Card>
+      )}
+
       <div className="dashboard-grid">
         <Card title="Findings"><p className="metric-value">{findings.length}</p><p className="muted">Total RAMSight findings</p></Card>
         <Card title="High priority"><p className="metric-value">{highPriorityFindings.length}</p><p className="muted">High or critical findings</p></Card>
@@ -191,7 +247,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading}
         error={findingError}
         empty={sortedFindings.length === 0}
-        emptyMessage="RAMSight has no risk findings for this job yet."
+        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no risk findings recorded.")}
       >
         <FindingTable caption="Critical and high findings are shown first" findings={sortedFindings} limit={20} />
       </ResultSection>
@@ -201,7 +257,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading}
         error={findingError}
         empty={processRiskSummaries.length === 0}
-        emptyMessage="No process risk summary findings are available for this job."
+        emptyMessage={terminalResultEmptyMessage(job.status, "No process risk summary findings are available for this job.")}
       >
         <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={20} />
       </ResultSection>
@@ -211,7 +267,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading || iocLoading}
         error={findingError || iocError}
         empty={networkFindings.length === 0 && networkIocs.length === 0}
-        emptyMessage="No network findings or network IOC records are available for this job."
+        emptyMessage={terminalResultEmptyMessage(job.status, "No network findings or network IOC records are available for this job.")}
       >
         <div className="page-stack compact-stack">
           {networkFindings.length > 0 && <FindingTable caption="Network-related findings" findings={networkFindings} limit={20} />}
@@ -224,7 +280,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading || iocLoading}
         error={findingError || iocError}
         empty={moduleFindings.length === 0 && moduleIocs.length === 0}
-        emptyMessage="No suspicious module or path indicators are available through the current APIs."
+        emptyMessage={terminalResultEmptyMessage(job.status, "No suspicious module or path indicators are available through the current APIs.")}
       >
         <div className="page-stack compact-stack">
           {moduleFindings.length > 0 && <FindingTable caption="Module/path findings" findings={moduleFindings} limit={20} />}
@@ -237,7 +293,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading || iocLoading}
         error={findingError || iocError}
         empty={memoryFindings.length === 0 && memoryIocs.length === 0}
-        emptyMessage="No memory region findings are available for this job."
+        emptyMessage={terminalResultEmptyMessage(job.status, "No memory region findings are available for this job.")}
       >
         <div className="page-stack compact-stack">
           {memoryFindings.length > 0 && <FindingTable caption="Memory region findings" findings={memoryFindings} limit={20} />}
@@ -250,7 +306,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading || iocLoading}
         error={findingError || iocError}
         empty={yaraFindings.length === 0 && yaraIocs.length === 0}
-        emptyMessage="No YARA findings or YARA IOC records are available for this job."
+        emptyMessage={terminalResultEmptyMessage(job.status, "No YARA findings or YARA IOC records are available for this job.")}
       >
         <div className="page-stack compact-stack">
           {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={20} />}
@@ -263,7 +319,7 @@ export function AnalysisJobStatusPage() {
         loading={iocLoading}
         error={iocError}
         empty={iocs.length === 0}
-        emptyMessage="RAMSight has no IOC records for this job yet."
+        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no IOC records extracted.")}
       >
         <IocTable caption="All IOC records for this analysis job" iocs={iocs} limit={100} />
       </ResultSection>
@@ -273,7 +329,7 @@ export function AnalysisJobStatusPage() {
         loading={reportLoading}
         error={reportError}
         empty={reports.length === 0}
-        emptyMessage="No HTML report metadata is available for this job yet."
+        emptyMessage={terminalResultEmptyMessage(job.status, "No HTML report metadata is available for this job yet.")}
       >
         <ReportSection reports={reports} />
       </ResultSection>
@@ -295,4 +351,3 @@ export function AnalysisJobStatusPage() {
     </div>
   );
 }
-

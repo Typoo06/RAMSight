@@ -35,8 +35,7 @@ export function ReportSection({ reports }: ReportSectionProps) {
           ))}
         </tbody>
       </Table>
-      <p className="muted">Direct HTML report open/download is not available yet because the backend currently exposes report metadata, not a download or presigned URL endpoint.</p>
+      <p className="muted">RAMSight generated report metadata is available here. Direct HTML open/download is not wired yet because the current backend exposes storage bucket/key metadata, not a download or presigned URL endpoint.</p>
     </div>
   );
 }
-

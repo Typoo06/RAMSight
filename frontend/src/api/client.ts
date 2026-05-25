@@ -18,11 +18,28 @@ function apiUrl(path: string): string {
 }
 
 async function parseResponse(response: Response): Promise<unknown> {
+  if (response.status === 204) {
+    return null;
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     return response.json();
   }
   return response.text();
+}
+
+function validationDetailMessage(items: unknown[]): string | null {
+  const messages = items
+    .map((item) => {
+      if (!item || typeof item !== "object" || !("msg" in item)) return null;
+      const message = String((item as { msg: unknown }).msg);
+      const location = "loc" in item && Array.isArray((item as { loc: unknown }).loc)
+        ? (item as { loc: unknown[] }).loc.join(".")
+        : null;
+      return location ? `${location}: ${message}` : message;
+    })
+    .filter((message): message is string => Boolean(message));
+  return messages.length > 0 ? messages.join("; ") : null;
 }
 
 function detailMessage(detail: unknown): string {
@@ -31,6 +48,9 @@ function detailMessage(detail: unknown): string {
   }
   if (detail && typeof detail === "object" && "detail" in detail) {
     const nested = (detail as { detail?: unknown }).detail;
+    if (Array.isArray(nested)) {
+      return validationDetailMessage(nested) ?? "RAMSight API validation failed.";
+    }
     return typeof nested === "string" ? nested : JSON.stringify(nested);
   }
   return "RAMSight API request failed.";
@@ -42,7 +62,16 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(apiUrl(path), { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(path), { ...init, headers });
+  } catch (err) {
+    throw new ApiError(
+      "RAMSight could not reach the API. Confirm the backend is running and VITE_API_BASE_URL/CORS are configured for this frontend origin.",
+      0,
+      err,
+    );
+  }
   const payload = await parseResponse(response);
 
   if (!response.ok) {
