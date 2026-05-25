@@ -12,19 +12,18 @@ def build_volatility_command(
     evidence_path: Path,
     output_dir: Path,
 ) -> list[str]:
+    _ = output_dir
     command = [
         settings.volatility_path,
         "-f",
         str(evidence_path),
+        "-q",
         "-r",
         "json",
-        "-o",
-        str(output_dir),
     ]
     if settings.volatility_symbol_path:
         command.extend(["-s", settings.volatility_symbol_path])
-    command.append(plugin.command_name)
     if plugin.requires_yara_rules and settings.volatility_yara_rules_path:
         command.extend(["--yara-file", settings.volatility_yara_rules_path])
+    command.append(plugin.command_name)
     return command
-

@@ -30,7 +30,11 @@ def test_runner_writes_raw_wrapper_for_success(tmp_path) -> None:
 
     payload = json.loads(result.raw_output_path.read_text(encoding="utf-8"))
     assert result.status == STATUS_COMPLETED
+    assert result.plugin_name == "windows.pslist"
+    assert result.source_plugin == "windows.pslist"
     assert result.raw_output_path.name == "windows_pslist.json"
+    assert payload["plugin_name"] == "windows.pslist"
+    assert payload["source_plugin"] == "windows.pslist"
     assert payload["stdout"] == '{"rows": []}'
     assert payload["command"][-1] == "windows.pslist.PsList"
 
@@ -80,4 +84,3 @@ def test_runner_marks_timeout_failed(tmp_path) -> None:
     assert result.status == STATUS_FAILED
     assert result.timed_out is True
     assert "timed out" in result.error_message
-
