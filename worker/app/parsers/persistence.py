@@ -51,7 +51,10 @@ def insert_artifact_batch(conn: Connection, batch: ParsedArtifactBatch, context:
         return 0
     table = ARTIFACT_TABLES[batch.table_name]
     rows = artifact_rows_with_context(batch, context, plugin_result_id, now)
-    conn.execute(insert(table), rows)
+    try:
+        conn.execute(insert(table), rows)
+    except Exception as exc:  # noqa: BLE001 - caller stores a short plugin-local error.
+        raise RuntimeError(f"{batch.table_name} persistence failed: {exc.__class__.__name__}") from exc
     return len(rows)
 
 
@@ -75,6 +78,5 @@ def update_plugin_result_parse_error(conn: Connection, plugin_result_id, existin
     conn.execute(
         update(plugin_results)
         .where(plugin_results.c.id == plugin_result_id)
-        .values(error_message=message[:500], parsed_record_count=0)
+        .values(error_message=message[:500], parsed_record_count=None)
     )
-

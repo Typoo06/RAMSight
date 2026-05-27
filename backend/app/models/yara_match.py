@@ -1,6 +1,6 @@
 # YARA match model.
 
-from sqlalchemy import ForeignKey, Integer, JSON, String, Text, Uuid
+from sqlalchemy import BigInteger, ForeignKey, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
@@ -21,6 +21,6 @@ class YaraMatch(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     tags: Mapped[list[str] | None] = mapped_column(JSON)
     target_type: Mapped[str | None] = mapped_column(String(100), index=True)
     target_identifier: Mapped[str | None] = mapped_column(String(255), index=True)
-    offset: Mapped[int | None] = mapped_column(Integer)
+    offset: Mapped[int | None] = mapped_column(BigInteger)
     matched_text_excerpt: Mapped[str | None] = mapped_column(Text)
     extra_data: Mapped[dict | None] = mapped_column(JSON)

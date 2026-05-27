@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy import create_engine, insert, select, update
 
 from app.db.tables import analysis_jobs, metadata, plugin_results
+from app.parsers.persistence import update_plugin_result_parse_error
 from app.tasks import status as task_status
 from app.tasks.analysis import (
     STATUS_COMPLETED,
@@ -112,3 +113,44 @@ def test_insert_plugin_result_preserves_yara_visibility_metadata() -> None:
 
     assert stored["extra_data"]["requires_yara_rules"] is True
     assert stored["extra_data"]["yara_rules_configured"] is False
+
+
+def test_parse_error_keeps_record_count_unknown() -> None:
+    engine = create_engine("sqlite://")
+    metadata.create_all(engine, tables=[plugin_results])
+    now = datetime.now(timezone.utc)
+    run_result = VolatilityRunResult(
+        plugin_name="windows.vadyarascan",
+        source_plugin="windows.vadyarascan",
+        status=task_status.STATUS_COMPLETED,
+        raw_output_path="windows_vadyarascan.json",
+        command=[],
+        return_code=0,
+        stdout="",
+        stderr="",
+        error_message=None,
+        duration_ms=10,
+    )
+    context = {
+        "job_id": uuid4(),
+        "evidence_id": uuid4(),
+        "job_os_family": "windows",
+        "plugin_profile": "windows_memory_yara",
+    }
+
+    with engine.begin() as conn:
+        plugin_result_id = insert_plugin_result(
+            conn,
+            context,
+            run_result,
+            raw_output=None,
+            started_at=now,
+            completed_at=now,
+            status=task_status.STATUS_COMPLETED,
+            error_message=None,
+        )
+        update_plugin_result_parse_error(conn, plugin_result_id, None, "yara_matches persistence failed: DataError")
+        stored = conn.execute(select(plugin_results).where(plugin_results.c.id == plugin_result_id)).mappings().one()
+
+    assert stored["parsed_record_count"] is None
+    assert stored["error_message"] == "parse error: yara_matches persistence failed: DataError"

@@ -210,7 +210,7 @@ yara_matches = Table(
     Column("tags", JSON),
     Column("target_type", String(100)),
     Column("target_identifier", String(255)),
-    Column("offset", Integer),
+    Column("offset", BigInteger),
     Column("matched_text_excerpt", Text),
     Column("extra_data", JSON),
     Column("created_at", DateTime(timezone=True), nullable=False),
