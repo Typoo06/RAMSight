@@ -34,6 +34,16 @@ KNOWN_WINDOWS_SYSTEM_PROCESSES = {
 DEFAULT_WINDOWS_SYSTEM_PATHS = {
     "explorer.exe": ["C:/Windows/"],
 }
+MEMORY_COMMAND_KEYWORDS = {
+    "downloadstring",
+    "frombase64string",
+    "invoke-expression",
+    "mimikatz",
+    "powershell -enc",
+    "powershell.exe -enc",
+    "rundll32",
+    "shellcode",
+}
 
 
 def normalize_process_name(value: str | None) -> str:
@@ -45,6 +55,13 @@ def normalize_path(value: str | None, os_family: str | None = None) -> str:
     if os_family == "windows":
         normalized = normalized.lower()
     return normalized
+
+
+def normalize_key_text(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    return text or None
 
 
 def process_identity(artifact: dict) -> str:
@@ -112,6 +129,16 @@ def evaluate_rules(rules: Iterable[DetectionRule], artifacts: dict[str, list[dic
                 findings.extend(evaluate_memory_regions(rule, artifacts, context))
             elif match_type == "yara_match":
                 findings.extend(evaluate_yara_matches(rule, artifacts, context))
+            elif match_type == "memory_injection_candidate":
+                findings.extend(evaluate_memory_injection_candidates(rule, artifacts, context))
+            elif match_type == "memory_region_with_network":
+                findings.extend(evaluate_memory_network_correlation(rule, artifacts, context))
+            elif match_type == "memory_region_with_suspicious_command":
+                findings.extend(evaluate_memory_command_correlation(rule, artifacts, context))
+            elif match_type == "memory_region_with_suspicious_module":
+                findings.extend(evaluate_memory_module_correlation(rule, artifacts, context))
+            elif match_type == "yara_match_in_process_memory":
+                findings.extend(evaluate_yara_process_memory(rule, artifacts, context))
         except Exception as exc:  # noqa: BLE001 - one bad rule should not stop detection.
             LOGGER.warning("skipping detection rule %s after safe error: %s", rule.id, str(exc)[:200])
     return findings
@@ -157,6 +184,87 @@ def process_extra(artifact: dict) -> dict:
         "command_line": artifact.get("command_line"),
         "source_plugin": artifact.get("source_plugin"),
     }
+
+
+def memory_region_label(artifact: dict) -> str:
+    start = artifact.get("start_address")
+    end = artifact.get("end_address")
+    if start and end:
+        return f"{start}-{end}"
+    return "address unavailable"
+
+
+def memory_address_key(artifact: dict) -> tuple:
+    return artifact.get("start_address"), artifact.get("end_address")
+
+
+def process_memory_key(context: dict, rule: DetectionRule, artifact: dict, *extra_parts) -> tuple:
+    return (
+        context.get("analysis_job_id"),
+        rule.id,
+        artifact.get("pid"),
+        normalize_key_text(artifact.get("process_name") or artifact.get("name")),
+        *memory_address_key(artifact),
+        *extra_parts,
+    )
+
+
+def memory_region_is_executable(artifact: dict) -> bool:
+    protection = str(artifact.get("protection") or "")
+    return bool(artifact.get("is_executable")) or "EXECUTE" in protection.upper()
+
+
+def memory_region_is_suspicious(artifact: dict) -> bool:
+    return memory_region_is_executable(artifact)
+
+
+def memory_extra(artifact: dict, reason: str, linked_artifacts: dict | None = None) -> dict:
+    extra = {
+        **process_extra(artifact),
+        "start_address": artifact.get("start_address"),
+        "end_address": artifact.get("end_address"),
+        "address_range": memory_region_label(artifact),
+        "protection": artifact.get("protection"),
+        "is_executable": artifact.get("is_executable"),
+        "is_private": artifact.get("is_private"),
+        "reasoning": reason,
+        "requires_validation": True,
+    }
+    if linked_artifacts:
+        extra["linked_artifacts"] = linked_artifacts
+    return extra
+
+
+def artifacts_by_pid(rows: list[dict]) -> dict[int, list[dict]]:
+    indexed: dict[int, list[dict]] = {}
+    for row in rows:
+        pid = row.get("pid")
+        if pid is None:
+            continue
+        indexed.setdefault(pid, []).append(row)
+    return indexed
+
+
+def suspicious_command_reason(command: str | None, keywords: list[str] | None = None) -> str | None:
+    if not command:
+        return None
+    if command_has_encoded_powershell(command):
+        return "encoded PowerShell command"
+    lowered = command.lower()
+    for keyword in sorted(keywords or MEMORY_COMMAND_KEYWORDS):
+        if str(keyword).lower() in lowered:
+            return f"suspicious command keyword: {keyword}"
+    return None
+
+
+def parse_pid_candidate(value) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value)
+    match = re.search(r"\b\d+\b", text)
+    return int(match.group(0)) if match else None
 
 
 def evaluate_system_process_wrong_path(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
@@ -355,7 +463,7 @@ def evaluate_memory_regions(rule: DetectionRule, artifacts: dict[str, list[dict]
     for artifact in artifacts.get(MEMORY_REGION_TABLE, []):
         if source_plugins and artifact.get("source_plugin") not in source_plugins:
             continue
-        if not artifact.get("is_executable") and artifact.get("source_plugin") != "windows.malfind":
+        if not memory_region_is_suspicious(artifact):
             continue
         start = artifact.get("start_address")
         end = artifact.get("end_address")
@@ -372,15 +480,7 @@ def evaluate_memory_regions(rule: DetectionRule, artifacts: dict[str, list[dict]
                 f"Suspicious executable memory region in {process_identity(artifact)}",
                 f"A malfind-like plugin reported a suspicious executable memory region ({region_label}); this is an injection candidate and requires analyst validation.",
                 MEMORY_REGION_TABLE,
-                {
-                    "pid": artifact.get("pid"),
-                    "process_name": artifact.get("process_name"),
-                    "start_address": artifact.get("start_address"),
-                    "end_address": artifact.get("end_address"),
-                    "protection": artifact.get("protection"),
-                    "is_executable": artifact.get("is_executable"),
-                    "is_private": artifact.get("is_private"),
-                },
+                memory_extra(artifact, "executable memory region reported by a malfind-like plugin"),
             )
         )
     return findings
@@ -412,4 +512,218 @@ def evaluate_yara_matches(rule: DetectionRule, artifacts: dict[str, list[dict]],
             },
         )
         findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
+    return findings
+
+
+def evaluate_memory_injection_candidates(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
+    source_plugins = set(rule.match.get("source_plugins") or [])
+    findings = []
+    seen = set()
+    for artifact in artifacts.get(MEMORY_REGION_TABLE, []):
+        if source_plugins and artifact.get("source_plugin") not in source_plugins:
+            continue
+        if not memory_region_is_suspicious(artifact):
+            continue
+        dedupe_key = process_memory_key(context, rule, artifact)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        findings.append(
+            make_finding(
+                rule,
+                context,
+                artifact,
+                f"Process injection candidate: {process_identity(artifact)}",
+                f"{process_identity(artifact)} has executable memory at {memory_region_label(artifact)}; this is a memory-only payload candidate and requires analyst validation.",
+                MEMORY_REGION_TABLE,
+                memory_extra(artifact, "executable/private memory region compatible with process injection candidate"),
+            )
+        )
+    return findings
+
+
+def evaluate_memory_network_correlation(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
+    network_by_pid = artifacts_by_pid(artifacts.get(NETWORK_TABLE, []))
+    findings = []
+    seen = set()
+    for region in artifacts.get(MEMORY_REGION_TABLE, []):
+        if not memory_region_is_suspicious(region) or region.get("pid") is None:
+            continue
+        for network in network_by_pid.get(region.get("pid"), []):
+            remote_address = network.get("remote_address")
+            if not is_public_remote_address(remote_address):
+                continue
+            dedupe_key = (
+                *process_memory_key(context, rule, region),
+                normalize_key_text(remote_address),
+                network.get("remote_port"),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            findings.append(
+                make_finding(
+                    rule,
+                    context,
+                    region,
+                    f"Executable memory region with network activity: {process_identity(region)}",
+                    f"{process_identity(region)} has suspicious executable memory and a public remote network connection; this is a candidate requiring validation.",
+                    MEMORY_REGION_TABLE,
+                    memory_extra(
+                        region,
+                        "executable memory region correlated with public remote network activity by PID",
+                        {
+                            "memory_region_artifact_id": str(region.get("id")),
+                            "network_artifact_id": str(network.get("id")),
+                            "remote_address": remote_address,
+                            "remote_port": network.get("remote_port"),
+                            "network_source_plugin": network.get("source_plugin"),
+                        },
+                    ),
+                )
+            )
+    return findings
+
+
+def evaluate_memory_command_correlation(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
+    command_by_pid = artifacts_by_pid(artifacts.get(COMMAND_TABLE, []))
+    keywords = rule.match.get("keywords") or sorted(MEMORY_COMMAND_KEYWORDS)
+    findings = []
+    seen = set()
+    for region in artifacts.get(MEMORY_REGION_TABLE, []):
+        if not memory_region_is_suspicious(region) or region.get("pid") is None:
+            continue
+        for command in command_by_pid.get(region.get("pid"), []):
+            reason = suspicious_command_reason(command.get("command"), keywords)
+            if not reason:
+                continue
+            dedupe_key = process_memory_key(
+                context,
+                rule,
+                region,
+                normalize_key_text(reason),
+                normalize_key_text(command.get("command")),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            findings.append(
+                make_finding(
+                    rule,
+                    context,
+                    region,
+                    f"Executable memory region with suspicious command line: {process_identity(region)}",
+                    f"{process_identity(region)} has suspicious executable memory and command-line evidence ({reason}); this is a candidate requiring validation.",
+                    MEMORY_REGION_TABLE,
+                    memory_extra(
+                        region,
+                        f"executable memory region correlated with {reason}",
+                        {
+                            "memory_region_artifact_id": str(region.get("id")),
+                            "command_artifact_id": str(command.get("id")),
+                            "command_excerpt": str(command.get("command") or "")[:500],
+                            "command_source_plugin": command.get("source_plugin"),
+                        },
+                    ),
+                )
+            )
+    return findings
+
+
+def evaluate_memory_module_correlation(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
+    os_family = (context.get("os_family") or "unknown").lower()
+    module_by_pid = artifacts_by_pid(artifacts.get(MODULE_TABLE, []))
+    fragments = [normalize_path(fragment, os_family) for fragment in rule.match.get("suspicious_path_fragments") or []]
+    findings = []
+    seen = set()
+    for region in artifacts.get(MEMORY_REGION_TABLE, []):
+        if not memory_region_is_suspicious(region) or region.get("pid") is None:
+            continue
+        for module in module_by_pid.get(region.get("pid"), []):
+            module_path = module.get("module_path")
+            if not is_path_like(module_path, os_family):
+                continue
+            normalized_path = normalize_path(module_path, os_family)
+            matched = [fragment for fragment in fragments if fragment in normalized_path]
+            if not matched:
+                continue
+            dedupe_key = process_memory_key(context, rule, region, normalized_path)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            findings.append(
+                make_finding(
+                    rule,
+                    context,
+                    region,
+                    f"Executable memory region with suspicious module path: {process_identity(region)}",
+                    f"{process_identity(region)} has suspicious executable memory and a module mapped from a user-writable path; this requires analyst validation.",
+                    MEMORY_REGION_TABLE,
+                    memory_extra(
+                        region,
+                        "executable memory region correlated with suspicious/user-writable module path by PID",
+                        {
+                            "memory_region_artifact_id": str(region.get("id")),
+                            "module_artifact_id": str(module.get("id")),
+                            "module_name": module.get("module_name"),
+                            "module_path": module_path,
+                            "matched_path_fragments": matched,
+                            "module_source_plugin": module.get("source_plugin"),
+                        },
+                    ),
+                )
+            )
+    return findings
+
+
+def evaluate_yara_process_memory(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
+    memory_by_pid = artifacts_by_pid(artifacts.get(MEMORY_REGION_TABLE, []))
+    findings = []
+    seen = set()
+    for yara_match in artifacts.get(YARA_TABLE, []):
+        source_plugin = yara_match.get("source_plugin")
+        target_type = str(yara_match.get("target_type") or "").lower()
+        if source_plugin not in {"windows.vadyarascan", "linux.vmayarascan"} and target_type != "process_memory":
+            continue
+        pid = parse_pid_candidate(yara_match.get("target_identifier"))
+        linked_regions = memory_by_pid.get(pid, []) if pid is not None else []
+        region = linked_regions[0] if linked_regions else {}
+        dedupe_key = (
+            context.get("analysis_job_id"),
+            rule.id,
+            normalize_key_text(yara_match.get("rule_name")),
+            pid,
+            yara_match.get("offset"),
+            normalize_key_text(yara_match.get("target_identifier")),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        process_name = region.get("process_name") or yara_match.get("target_identifier")
+        title_identity = process_identity({"pid": pid, "process_name": process_name})
+        findings.append(
+            make_finding(
+                rule,
+                context,
+                yara_match,
+                f"YARA match in process memory: {title_identity}",
+                f"YARA rule {yara_match.get('rule_name')} matched process memory; this is suspicious and requires analyst validation.",
+                YARA_TABLE,
+                {
+                    "pid": pid,
+                    "process_name": process_name,
+                    "rule_name": yara_match.get("rule_name"),
+                    "namespace": yara_match.get("namespace"),
+                    "tags": yara_match.get("tags"),
+                    "target_identifier": yara_match.get("target_identifier"),
+                    "target_type": yara_match.get("target_type"),
+                    "offset": yara_match.get("offset"),
+                    "matched_text_excerpt": yara_match.get("matched_text_excerpt"),
+                    "yara_match_artifact_id": str(yara_match.get("id")),
+                    "linked_memory_region_artifact_ids": [str(item.get("id")) for item in linked_regions if item.get("id")],
+                    "reasoning": "YARA match produced by process-memory scanning plugin",
+                    "requires_validation": True,
+                },
+            )
+        )
     return findings

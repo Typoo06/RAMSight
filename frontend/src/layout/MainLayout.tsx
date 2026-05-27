@@ -13,7 +13,7 @@ export function MainLayout({ children }: MainLayoutProps) {
           <span className="brand-mark">R</span>
           <div>
             <strong>RAMSight</strong>
-            <span>Memory triage</span>
+            <span>Memory-only malware analysis</span>
           </div>
         </div>
         <nav aria-label="RAMSight navigation">

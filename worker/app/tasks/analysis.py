@@ -160,7 +160,11 @@ def insert_plugin_result(
             parsed_record_count=0,
             error_message=error_message,
             duration_ms=run_result.duration_ms,
-            extra_data={"return_code": run_result.return_code, "timed_out": run_result.timed_out},
+            extra_data={
+                "return_code": run_result.return_code,
+                "timed_out": run_result.timed_out,
+                **(run_result.extra_data or {}),
+            },
             started_at=started_at,
             completed_at=completed_at,
             created_at=started_at,

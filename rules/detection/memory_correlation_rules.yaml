@@ -1,0 +1,77 @@
+rules:
+  - id: MEMORY_PROCESS_INJECTION_CANDIDATE
+    name: Process injection candidate
+    description: Correlates executable memory-region evidence into a cautious process injection candidate finding.
+    category: memory_only
+    os_scope: all
+    severity: high
+    score: 8
+    enabled: true
+    recommendation: Validate the process, memory permissions, command line, and related artifacts before concluding malware.
+    match:
+      type: memory_injection_candidate
+      source_plugins:
+        - windows.malfind
+        - linux.vmayarascan
+  - id: MEMORY_REGION_WITH_NETWORK_ACTIVITY
+    name: Executable memory region with network activity
+    description: Correlates executable memory-region evidence with public remote network activity by PID.
+    category: memory_only
+    os_scope: all
+    severity: critical
+    score: 13
+    enabled: true
+    recommendation: Preserve evidence, review the process tree, and hunt the remote endpoint in firewall, proxy, and SIEM telemetry.
+    match:
+      type: memory_region_with_network
+  - id: MEMORY_REGION_WITH_SUSPICIOUS_COMMAND
+    name: Executable memory region with suspicious command line
+    description: Correlates executable memory-region evidence with suspicious command-line behavior by PID.
+    category: memory_only
+    os_scope: all
+    severity: critical
+    score: 13
+    enabled: true
+    recommendation: Review parent-child process context, persistence locations, and script execution telemetry for the process.
+    match:
+      type: memory_region_with_suspicious_command
+      keywords:
+        - downloadstring
+        - frombase64string
+        - invoke-expression
+        - mimikatz
+        - powershell -enc
+        - powershell.exe -enc
+        - rundll32
+        - shellcode
+  - id: MEMORY_REGION_WITH_SUSPICIOUS_MODULE
+    name: Executable memory region with suspicious module path
+    description: Correlates executable memory-region evidence with a loaded module from a temporary or user-writable path by PID.
+    category: memory_only
+    os_scope: all
+    severity: high
+    score: 10
+    enabled: true
+    recommendation: Validate the loaded module path and hash any recoverable file through trusted tooling.
+    match:
+      type: memory_region_with_suspicious_module
+      suspicious_path_fragments:
+        - "\\Temp\\"
+        - "/Temp/"
+        - "\\AppData\\"
+        - "/AppData/"
+        - "\\Users\\Public\\"
+        - "/Users/Public/"
+        - "/tmp/"
+        - "/dev/shm/"
+  - id: YARA_MATCH_IN_PROCESS_MEMORY
+    name: YARA match in process memory
+    description: Creates a cautious finding when a process-memory YARA scan reports a rule match.
+    category: memory_only
+    os_scope: all
+    severity: high
+    score: 10
+    enabled: true
+    recommendation: Validate the matched YARA rule quality, process context, and nearby memory-region evidence before concluding malware.
+    match:
+      type: yara_match_in_process_memory

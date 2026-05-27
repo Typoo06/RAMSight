@@ -17,6 +17,7 @@ PARSER_REGISTRY = {
     "windows.dlllist": parse_module_artifacts,
     "windows.handles": parse_handles_as_no_artifacts,
     "windows.malfind": parse_memory_region_artifacts,
+    "windows.vadyarascan": parse_yara_matches,
     "yarascan": parse_yara_matches,
 }
 
@@ -38,4 +39,3 @@ def parse_raw_wrapper(path) -> ParsedArtifactBatch:
         return parser(rows, source_plugin)
     except Exception as exc:  # noqa: BLE001 - caller stores a short parse error on the plugin result.
         raise ParserError(str(exc)) from exc
-

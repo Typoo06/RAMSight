@@ -67,6 +67,35 @@ def test_runner_skips_yarascan_without_rule_configuration(tmp_path) -> None:
     assert result.status == STATUS_SKIPPED
     assert "YARA rule configuration" in result.error_message
     assert payload["command"] == []
+    assert result.extra_data["requires_yara_rules"] is True
+    assert result.extra_data["yara_rules_configured"] is False
+    assert payload["extra_data"]["skip_reason"] == "YARA rule configuration is required for this plugin"
+
+
+def test_runner_uses_discovered_yara_rules_for_vadyarascan(tmp_path) -> None:
+    yara_dir = tmp_path / "rules" / "yara"
+    yara_dir.mkdir(parents=True)
+    rule_path = yara_dir / "demo.yar"
+    rule_path.write_text("rule Demo { condition: false }", encoding="utf-8")
+
+    class YaraSettings(DummySettings):
+        rules_dir = str(tmp_path / "rules")
+
+    def fake_run(command, capture_output, text, timeout, check):
+        assert command[-3:] == ["windows.vadyarascan.VadYaraScan", "--yara-file", str(rule_path)]
+        return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    result = run_volatility_plugin(
+        get_plugin_definition("windows.vadyarascan"),
+        tmp_path / "evidence.raw",
+        tmp_path / "raw",
+        settings=YaraSettings(),
+        process_runner=fake_run,
+    )
+
+    assert result.status == STATUS_COMPLETED
+    assert result.extra_data["yara_rules_configured"] is True
+    assert result.extra_data["yara_rules_source"] == "demo.yar"
 
 
 def test_runner_marks_timeout_failed(tmp_path) -> None:

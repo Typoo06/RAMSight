@@ -14,6 +14,7 @@ WINDOWS_CLI_PLUGIN_NAMES = {
     "windows.dlllist": "windows.dlllist.DllList",
     "windows.handles": "windows.handles.Handles",
     "windows.malfind": "windows.malfind.Malfind",
+    "windows.vadyarascan": "windows.vadyarascan.VadYaraScan",
 }
 
 
@@ -24,6 +25,7 @@ def test_windows_default_profile_excludes_optional_yarascan() -> None:
     assert "windows.pslist" in plugin_names
     assert "windows.malfind" in plugin_names
     assert "yarascan" not in plugin_names
+    assert "windows.vadyarascan" not in plugin_names
 
 
 def test_windows_plugins_keep_logical_and_cli_names_separate() -> None:
@@ -40,6 +42,30 @@ def test_requested_yarascan_is_available_as_optional_plugin() -> None:
     assert plugins[0].name == "yarascan"
     assert plugins[0].requires_yara_rules is True
     assert plugins[0].optional is True
+
+
+def test_requested_windows_vadyarascan_is_available() -> None:
+    plugins = select_plugins("windows", requested_plugins=["windows.vadyarascan"])
+
+    assert plugins[0].name == "windows.vadyarascan"
+    assert plugins[0].command_name == "windows.vadyarascan.VadYaraScan"
+
+
+def test_windows_vadyarascan_is_registered_as_optional_process_memory_yara() -> None:
+    plugin = get_plugin_definition("windows.vadyarascan")
+
+    assert plugin.name == "windows.vadyarascan"
+    assert plugin.command_name == "windows.vadyarascan.VadYaraScan"
+    assert plugin.requires_yara_rules is True
+    assert plugin.optional is True
+
+
+def test_explicit_windows_memory_yara_profile_includes_vadyarascan() -> None:
+    plugins = select_plugins("windows", plugin_profile="windows_memory_yara", requested_plugins=None)
+    plugin_names = [plugin.name for plugin in plugins]
+
+    assert "windows.vadyarascan" in plugin_names
+    assert "windows.malfind" in plugin_names
 
 
 def test_unknown_os_without_requested_plugins_fails_cleanly() -> None:

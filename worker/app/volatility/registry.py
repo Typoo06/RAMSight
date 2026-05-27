@@ -22,6 +22,13 @@ PLUGIN_REGISTRY = {
     "windows.dlllist": PluginDefinition("windows.dlllist", "windows.dlllist.DllList", "windows"),
     "windows.handles": PluginDefinition("windows.handles", "windows.handles.Handles", "windows"),
     "windows.malfind": PluginDefinition("windows.malfind", "windows.malfind.Malfind", "windows"),
+    "windows.vadyarascan": PluginDefinition(
+        "windows.vadyarascan",
+        "windows.vadyarascan.VadYaraScan",
+        "windows",
+        optional=True,
+        requires_yara_rules=True,
+    ),
     "yarascan": PluginDefinition(
         "yarascan",
         "yarascan.YaraScan",
@@ -66,6 +73,17 @@ PLUGIN_PROFILES = {
         "windows.dlllist",
         "windows.handles",
         "windows.malfind",
+    ],
+    "windows_memory_yara": [
+        "windows.pslist",
+        "windows.psscan",
+        "windows.pstree",
+        "windows.cmdline",
+        "windows.netscan",
+        "windows.dlllist",
+        "windows.handles",
+        "windows.malfind",
+        "windows.vadyarascan",
     ],
     "linux_default": [
         "linux.pslist",
@@ -112,4 +130,3 @@ def select_plugins(
     if profile_name not in PLUGIN_PROFILES:
         raise PluginSelectionError(f"unknown Volatility plugin profile: {profile_name}")
     return [get_plugin_definition(plugin_name) for plugin_name in PLUGIN_PROFILES[profile_name]]
-

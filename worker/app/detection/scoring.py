@@ -5,6 +5,19 @@ from collections import defaultdict
 from app.detection.rules import FindingDraft
 from app.parsers.common import is_placeholder_value
 
+MEMORY_REGION_RULE_IDS = {
+    "SUSPICIOUS_EXECUTABLE_MEMORY_REGION",
+    "MEMORY_PROCESS_INJECTION_CANDIDATE",
+}
+NETWORK_CORRELATION_RULE_IDS = {"MEMORY_REGION_WITH_NETWORK_ACTIVITY", "EXTERNAL_NETWORK_CONNECTION"}
+COMMAND_CORRELATION_RULE_IDS = {
+    "MEMORY_REGION_WITH_SUSPICIOUS_COMMAND",
+    "WIN_ENCODED_POWERSHELL",
+    "WIN_SUSPICIOUS_COMMAND_KEYWORDS",
+}
+MODULE_CORRELATION_RULE_IDS = {"MEMORY_REGION_WITH_SUSPICIOUS_MODULE", "WIN_SUSPICIOUS_MODULE_PATH"}
+YARA_RULE_IDS = {"YARA_MATCH", "YARA_MATCH_IN_PROCESS_MEMORY"}
+
 
 def severity_for_score(score: int, scoring_config: dict) -> str:
     for severity, bounds in (scoring_config.get("risk_levels") or {}).items():
@@ -46,6 +59,7 @@ def process_key_from_finding(finding: FindingDraft) -> tuple | None:
 
 def component_key(finding: FindingDraft) -> tuple:
     extra_data = finding.extra_data or {}
+    linked_artifacts = extra_data.get("linked_artifacts") or {}
     return (
         finding.rule_id,
         finding.category,
@@ -55,9 +69,55 @@ def component_key(finding: FindingDraft) -> tuple:
         normalize_path(extra_data.get("module_path")),
         extra_data.get("start_address"),
         extra_data.get("end_address"),
-        extra_data.get("remote_address"),
-        extra_data.get("remote_port"),
+        linked_artifacts.get("remote_address") or extra_data.get("remote_address"),
+        linked_artifacts.get("remote_port") or extra_data.get("remote_port"),
+        normalize_text(linked_artifacts.get("command_excerpt") or extra_data.get("command_excerpt")),
+        normalize_path(linked_artifacts.get("module_path") or extra_data.get("module_path")),
+        extra_data.get("rule_name"),
+        extra_data.get("offset"),
     )
+
+
+def evidence_groups_for_finding(finding: FindingDraft) -> set[str]:
+    if finding.rule_id in NETWORK_CORRELATION_RULE_IDS:
+        return {"network_endpoint"}
+    if finding.rule_id in COMMAND_CORRELATION_RULE_IDS:
+        return {"suspicious_command"}
+    if finding.rule_id in MODULE_CORRELATION_RULE_IDS:
+        return {"suspicious_module"}
+    if finding.rule_id in YARA_RULE_IDS or finding.artifact_type == "yara_matches":
+        return {"yara_match"}
+    if finding.rule_id in MEMORY_REGION_RULE_IDS or finding.artifact_type == "memory_region_artifacts":
+        return {"memory_region"}
+    return {finding.rule_id.lower()}
+
+
+def count_unique_values(components: list[FindingDraft], group_name: str) -> int:
+    values = set()
+    for component in components:
+        extra_data = component.extra_data or {}
+        linked_artifacts = extra_data.get("linked_artifacts") or {}
+        groups = evidence_groups_for_finding(component)
+        if group_name not in groups:
+            continue
+        if group_name == "memory_region":
+            values.add((extra_data.get("pid"), extra_data.get("start_address"), extra_data.get("end_address")))
+        elif group_name == "network_endpoint":
+            values.add((linked_artifacts.get("remote_address") or extra_data.get("remote_address"), linked_artifacts.get("remote_port") or extra_data.get("remote_port")))
+        elif group_name == "yara_match":
+            values.add((extra_data.get("rule_name"), extra_data.get("target_identifier"), extra_data.get("offset")))
+    return len({value for value in values if any(part is not None for part in value)})
+
+
+def score_by_independent_evidence_groups(components: list[FindingDraft]) -> tuple[int, set[str]]:
+    group_scores: dict[str, int] = {}
+    evidence_groups = set()
+    for component in components:
+        groups = evidence_groups_for_finding(component)
+        evidence_groups.update(groups)
+        for group in groups:
+            group_scores[group] = max(group_scores.get(group, 0), component.score)
+    return sum(group_scores.values()), evidence_groups
 
 
 def unique_components(components: list[FindingDraft]) -> list[FindingDraft]:
@@ -102,8 +162,10 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         if len(deduped) < 2:
             continue
         selected = deduped[:max_components]
-        total_score = sum(component.score for component in selected)
+        total_score, evidence_groups = score_by_independent_evidence_groups(selected)
         severity = severity_for_score(total_score, scoring_config)
+        if severity == "critical" and len(evidence_groups) < 2:
+            severity = "high"
         first = selected[0]
         first_extra = first.extra_data or {}
         pid = first_extra.get("pid") or next(
@@ -125,6 +187,10 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         component_rule_ids = sorted({component.rule_id for component in selected})
         component_categories = sorted({component.category for component in selected})
         identity = process_identity(pid, process_name)
+        unique_component_count = len(selected)
+        memory_region_count = count_unique_values(selected, "memory_region")
+        network_endpoint_count = count_unique_values(selected, "network_endpoint")
+        yara_match_count = count_unique_values(selected, "yara_match")
         summaries.append(
             FindingDraft(
                 analysis_job_id=first.analysis_job_id,
@@ -148,9 +214,14 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
                     "process_name": process_name,
                     "image_path": image_path,
                     "total_score": total_score,
+                    "unique_component_count": unique_component_count,
                     "component_finding_ids": [str(component.id) for component in selected],
                     "component_rule_ids": component_rule_ids,
                     "component_categories": component_categories,
+                    "evidence_groups": sorted(evidence_groups),
+                    "memory_region_count": memory_region_count,
+                    "network_endpoint_count": network_endpoint_count,
+                    "yara_match_count": yara_match_count,
                 },
             )
         )

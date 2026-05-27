@@ -6,6 +6,7 @@ from uuid import uuid4
 from app.detection.engine import (
     COMMAND_TABLE,
     MEMORY_REGION_TABLE,
+    MODULE_TABLE,
     NETWORK_TABLE,
     PROCESS_TABLE,
     YARA_TABLE,
@@ -241,3 +242,189 @@ def test_process_risk_aggregation_deduplicates_repeated_components() -> None:
     summaries = build_process_risk_summaries([first, duplicate], load_risk_scoring_config(rules_dir()))
 
     assert summaries == []
+
+
+def memory_region(pid: int = 2924) -> dict:
+    return {
+        "id": uuid4(),
+        "pid": pid,
+        "process_name": "WinRAR.exe",
+        "source_plugin": "windows.malfind",
+        "start_address": "0x400000",
+        "end_address": "0x401000",
+        "protection": "PAGE_EXECUTE_READWRITE",
+        "is_executable": True,
+        "is_private": True,
+    }
+
+
+def test_process_injection_candidate_from_malfind_region() -> None:
+    artifacts = {MEMORY_REGION_TABLE: [memory_region()]}
+
+    findings = evaluate_rules([rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE")], artifacts, context())
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "MEMORY_PROCESS_INJECTION_CANDIDATE"
+    assert "WinRAR.exe" in findings[0].title
+    assert findings[0].extra_data["pid"] == 2924
+    assert findings[0].extra_data["address_range"] == "0x400000-0x401000"
+    assert findings[0].extra_data["requires_validation"] is True
+
+
+def test_memory_region_network_correlation_by_pid() -> None:
+    network_id = uuid4()
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        NETWORK_TABLE: [
+            {"id": network_id, "pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443, "source_plugin": "windows.netscan"},
+            {"id": uuid4(), "pid": 2924, "remote_address": "192.168.1.2", "remote_port": 445, "source_plugin": "windows.netscan"},
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("MEMORY_REGION_WITH_NETWORK_ACTIVITY")], artifacts, context())
+
+    assert len(findings) == 1
+    assert findings[0].severity == "critical"
+    assert findings[0].extra_data["linked_artifacts"]["network_artifact_id"] == str(network_id)
+    assert findings[0].extra_data["linked_artifacts"]["remote_address"] == "8.8.8.8"
+
+
+def test_memory_region_suspicious_command_correlation_by_pid() -> None:
+    command_id = uuid4()
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        COMMAND_TABLE: [
+            {
+                "id": command_id,
+                "pid": 2924,
+                "process_name": "WinRAR.exe",
+                "command": "powershell.exe -enc " + "SQBFAFgA" * 8,
+                "source_plugin": "windows.cmdline",
+            }
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("MEMORY_REGION_WITH_SUSPICIOUS_COMMAND")], artifacts, context())
+
+    assert len(findings) == 1
+    assert "suspicious command line" in findings[0].title.lower()
+    assert findings[0].extra_data["linked_artifacts"]["command_artifact_id"] == str(command_id)
+
+
+def test_memory_region_module_correlation_by_pid() -> None:
+    module_id = uuid4()
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        MODULE_TABLE: [
+            {
+                "id": module_id,
+                "pid": 2924,
+                "process_name": "WinRAR.exe",
+                "module_name": "odd.dll",
+                "module_path": "C:\\Users\\Public\\odd.dll",
+                "source_plugin": "windows.dlllist",
+            }
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("MEMORY_REGION_WITH_SUSPICIOUS_MODULE")], artifacts, context())
+
+    assert len(findings) == 1
+    assert findings[0].extra_data["linked_artifacts"]["module_artifact_id"] == str(module_id)
+
+
+def test_memory_correlation_deduplicates_same_region_and_network() -> None:
+    region = memory_region()
+    artifacts = {
+        MEMORY_REGION_TABLE: [region, {**region, "id": uuid4()}],
+        NETWORK_TABLE: [
+            {"id": uuid4(), "pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443},
+            {"id": uuid4(), "pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443},
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("MEMORY_REGION_WITH_NETWORK_ACTIVITY")], artifacts, context())
+
+    assert len(findings) == 1
+
+
+def test_yara_match_in_process_memory_finding_and_no_fabricated_matches() -> None:
+    findings = evaluate_rules([rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")], {YARA_TABLE: []}, context())
+    assert findings == []
+
+    yara_id = uuid4()
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        YARA_TABLE: [
+            {
+                "id": yara_id,
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": "RAMSight_Demo_Injection_API_Cluster",
+                "target_type": "process_memory",
+                "target_identifier": "2924",
+                "offset": 0x400120,
+            }
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")], artifacts, context())
+
+    assert len(findings) == 1
+    assert findings[0].artifact_id == str(yara_id)
+    assert findings[0].extra_data["pid"] == 2924
+    assert findings[0].extra_data["linked_memory_region_artifact_ids"]
+
+
+def test_process_risk_summary_aggregates_memory_only_signals() -> None:
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        NETWORK_TABLE: [{"id": uuid4(), "pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443}],
+    }
+    rules = [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("MEMORY_REGION_WITH_NETWORK_ACTIVITY")]
+
+    findings = evaluate_rules(rules, artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    assert len(summaries) == 1
+    assert summaries[0].extra_data["pid"] == 2924
+    assert summaries[0].extra_data["process_name"] == "WinRAR.exe"
+    assert summaries[0].extra_data["total_score"] == 21
+    assert summaries[0].severity == "critical"
+    assert summaries[0].extra_data["unique_component_count"] == 2
+    assert summaries[0].extra_data["memory_region_count"] == 1
+    assert summaries[0].extra_data["network_endpoint_count"] == 1
+    assert summaries[0].extra_data["yara_match_count"] == 0
+
+
+def test_process_risk_summary_does_not_inflate_repeated_memory_only_rows() -> None:
+    region_one = memory_region()
+    region_two = {**memory_region(), "id": uuid4(), "start_address": "0x500000", "end_address": "0x501000"}
+    artifacts = {MEMORY_REGION_TABLE: [region_one, region_two, {**region_two, "id": uuid4()}]}
+    rules = [rule_by_id("SUSPICIOUS_EXECUTABLE_MEMORY_REGION"), rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE")]
+
+    findings = evaluate_rules(rules, artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    assert len(summaries) == 1
+    assert summaries[0].severity == "high"
+    assert summaries[0].extra_data["total_score"] == 8
+    assert summaries[0].extra_data["memory_region_count"] == 2
+    assert summaries[0].extra_data["network_endpoint_count"] == 0
+    assert set(summaries[0].extra_data["component_rule_ids"]) == {
+        "SUSPICIOUS_EXECUTABLE_MEMORY_REGION",
+        "MEMORY_PROCESS_INJECTION_CANDIDATE",
+    }
+
+
+def test_critical_process_summary_requires_independent_evidence_categories() -> None:
+    region_one = memory_region()
+    region_two = {**memory_region(), "id": uuid4(), "start_address": "0x600000", "end_address": "0x601000"}
+    artifacts = {MEMORY_REGION_TABLE: [region_one, region_two]}
+
+    findings = evaluate_rules([rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE")], artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    assert len(summaries) == 1
+    assert summaries[0].severity == "high"
+    assert summaries[0].extra_data["total_score"] == 8
+    assert summaries[0].extra_data["unique_component_count"] == 2

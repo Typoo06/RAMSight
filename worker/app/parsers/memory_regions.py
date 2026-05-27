@@ -5,6 +5,7 @@ import re
 from app.parsers.common import ParsedArtifactBatch, first_value, normalize_record, to_bool, to_int, to_str, truncate_text
 
 ADDRESS_RANGE_RE = re.compile(r"(?P<start>0x[0-9a-fA-F]+|\d+)\s*[-:]\s*(?P<end>0x[0-9a-fA-F]+|\d+)")
+MEMORY_EXCERPT_LIMIT = 1000
 
 
 def is_executable_protection(value: str | None) -> bool:
@@ -59,8 +60,10 @@ def parse_memory_region_artifacts(rows: list[dict], source_plugin: str) -> Parse
                 "is_executable": is_executable_protection(protection),
                 "is_private": to_bool(first_value(row, ["private", "is_private"])),
                 "description": truncate_text(first_value(row, ["description", "detail", "notes"])),
-                "hexdump_excerpt": truncate_text(first_value(row, ["hexdump", "hex_dump", "hexdump_excerpt"])),
-                "disassembly_excerpt": truncate_text(first_value(row, ["disasm", "disassembly", "disassembly_excerpt"])),
+                "hexdump_excerpt": truncate_text(first_value(row, ["hexdump", "hex_dump", "hexdump_excerpt"]), MEMORY_EXCERPT_LIMIT),
+                "disassembly_excerpt": truncate_text(
+                    first_value(row, ["disasm", "disassembly", "disassembly_excerpt"]), MEMORY_EXCERPT_LIMIT
+                ),
                 "raw_record": raw_record,
             }
         )

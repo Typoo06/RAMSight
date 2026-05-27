@@ -53,3 +53,13 @@ def test_malfind_parser_extracts_address_range_when_available() -> None:
 
     assert batch.records[0]["start_address"] == "0x500000"
     assert batch.records[0]["end_address"] == "0x501000"
+
+
+def test_malfind_parser_truncates_memory_excerpts() -> None:
+    long_excerpt = "90 " * 600
+    batch = parse_memory_region_artifacts(
+        [{"PID": 1128, "Process": "NOTEPAD.exe", "Start": "0x500000", "End": "0x501000", "Hexdump": long_excerpt}],
+        "windows.malfind",
+    )
+
+    assert len(batch.records[0]["hexdump_excerpt"]) == 1000
