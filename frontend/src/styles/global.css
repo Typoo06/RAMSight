@@ -60,6 +60,7 @@ a { color: inherit; }
 .table th, .table td { border-bottom: 1px solid #e2e8ed; padding: 10px; text-align: left; vertical-align: top; }
 .table th { color: #4d5d68; font-size: 12px; text-transform: uppercase; }
 .table-subtext { color: #63717d; display: block; font-size: 13px; margin-top: 4px; }
+.table-context { color: #2f5d68; overflow-wrap: anywhere; }
 .state { background: #ffffff; border: 1px solid #dce3e8; border-radius: 8px; padding: 16px; }
 .state-error { border-color: #f0b8b2; color: #7b1f16; display: grid; gap: 4px; }
 .state-loading { color: #4d5d68; }
@@ -68,6 +69,7 @@ a { color: inherit; }
 input, select, textarea { border: 1px solid #c8d3db; border-radius: 6px; color: #18232d; font: inherit; padding: 10px; width: 100%; }
 textarea { resize: vertical; }
 .field-help { color: #63717d; font-size: 13px; font-weight: 500; }
+.section-note { color: #4d5d68; margin: 0; }
 .form-grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 .metadata-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 14px; }
@@ -82,6 +84,10 @@ code { overflow-wrap: anywhere; }
 .item-panel-header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
 .item-panel-header div { display: grid; gap: 3px; }
 .item-panel-header span { color: #63717d; font-size: 13px; }
+.item-panel-header .analysis-start-controls { display: grid; gap: 8px; min-width: min(320px, 100%); }
+.analysis-profile-label { display: grid; gap: 6px; font-weight: 700; }
+.analysis-profile-label > span { color: #4d5d68; font-size: 12px; text-transform: uppercase; }
+.profile-help { margin: 0; }
 .timeline-list { display: grid; gap: 8px; margin: 0 0 14px; padding-left: 20px; }
 .timeline-list li { color: #63717d; }
 .timeline-list .timeline-current { color: #18232d; font-weight: 800; }

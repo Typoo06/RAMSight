@@ -1,4 +1,5 @@
 export type OSFamily = "windows" | "linux" | "unknown" | string;
+export type AnalysisPluginProfile = "windows_default" | "windows_memory_yara";
 
 export interface Case {
   id: string;

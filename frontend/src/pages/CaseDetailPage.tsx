@@ -9,12 +9,52 @@ import { Card } from "../components/ui/Card";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Table } from "../components/ui/Table";
-import type { AnalysisJob, Case, Evidence } from "../types/domain";
+import type { AnalysisJob, AnalysisPluginProfile, Case, Evidence } from "../types/domain";
 import { displayValue, formatBytes, formatDateTime, shortHash } from "../utils/format";
 import { statusTone } from "../utils/status";
 
+const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_default";
+
+const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; value: AnalysisPluginProfile }> = [
+  {
+    value: "windows_default",
+    label: "Standard Windows triage",
+    description: "Fast default RAMSight analysis without YARA scanning.",
+  },
+  {
+    value: "windows_memory_yara",
+    label: "Windows memory + YARA triage",
+    description: "Runs memory triage plus YARA process-memory scanning when rules are available.",
+  },
+];
+
 function evidenceOsFamily(evidence: Evidence): string {
   return evidence.os_family || "windows";
+}
+
+function normalizedEvidenceOsFamily(evidence: Evidence): string {
+  return (evidence.os_family || "unknown").toLowerCase();
+}
+
+function supportsWindowsAnalysisProfiles(evidence: Evidence): boolean {
+  const osFamily = normalizedEvidenceOsFamily(evidence);
+  return osFamily === "windows" || osFamily === "unknown";
+}
+
+function profileDescription(profile: AnalysisPluginProfile): string {
+  return ANALYSIS_PROFILE_OPTIONS.find((option) => option.value === profile)?.description ?? "RAMSight analysis profile.";
+}
+
+function profileHelpText(evidence: Evidence, profile: AnalysisPluginProfile): string {
+  const osFamily = normalizedEvidenceOsFamily(evidence);
+  if (osFamily === "linux") return "Linux analysis profiles are planned; Windows MVP profiles are not available for Linux evidence.";
+  if (osFamily !== "windows" && osFamily !== "unknown") return "This evidence OS family does not have a RAMSight analysis profile yet.";
+  if (osFamily === "unknown") return "OS is unknown; use these Windows MVP profiles only when the dump is expected to be Windows.";
+  return profileDescription(profile);
+}
+
+function profileLabel(profile: string | null | undefined): string {
+  return ANALYSIS_PROFILE_OPTIONS.find((option) => option.value === profile)?.label ?? displayValue(profile);
 }
 
 export function CaseDetailPage() {
@@ -29,6 +69,7 @@ export function CaseDetailPage() {
   const [jobs, setJobs] = useState<AnalysisJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [jobsLoading, setJobsLoading] = useState(true);
+  const [profileByEvidenceId, setProfileByEvidenceId] = useState<Record<string, AnalysisPluginProfile>>({});
   const [startError, setStartError] = useState<string | null>(null);
   const [startingEvidenceId, setStartingEvidenceId] = useState<string | null>(null);
 
@@ -78,11 +119,16 @@ export function CaseDetailPage() {
     return new Map(evidences.map((evidence) => [evidence.id, evidence.original_filename]));
   }, [evidences]);
 
+  function selectedProfileForEvidence(evidence: Evidence): AnalysisPluginProfile {
+    return profileByEvidenceId[evidence.id] ?? DEFAULT_ANALYSIS_PROFILE;
+  }
+
   async function handleStartAnalysis(evidence: Evidence) {
     if (!caseId) return;
     setStartError(null);
     setStartingEvidenceId(evidence.id);
     try {
+      const pluginProfile = supportsWindowsAnalysisProfiles(evidence) ? selectedProfileForEvidence(evidence) : null;
       const job = await createAnalysisJob({
         case_id: caseId,
         evidence_id: evidence.id,
@@ -91,6 +137,7 @@ export function CaseDetailPage() {
         architecture: evidence.architecture,
         kernel_version: evidence.kernel_version,
         symbol_table: evidence.symbol_table,
+        plugin_profile: pluginProfile,
       });
       navigate(`/cases/${caseId}/jobs/${job.id}`);
     } catch (err) {
@@ -144,35 +191,60 @@ export function CaseDetailPage() {
         )}
         {!evidenceLoading && !evidenceError && evidences.length > 0 && (
           <div className="item-list">
-            {evidences.map((evidence) => (
-              <article className="item-panel" key={evidence.id}>
-                <header className="item-panel-header">
-                  <div>
-                    <strong>{evidence.original_filename}</strong>
-                    <span>{displayValue(evidence.source_type)} evidence</span>
-                  </div>
-                  <Button
-                    disabled={startingEvidenceId === evidence.id}
-                    type="button"
-                    onClick={() => void handleStartAnalysis(evidence)}
-                  >
-                    {startingEvidenceId === evidence.id ? "Starting..." : "Start analysis"}
-                  </Button>
-                </header>
-                <dl className="metadata-list metadata-list-wide">
-                  <div><dt>OS family</dt><dd>{displayValue(evidence.os_family)}</dd></div>
-                  <div><dt>OS version</dt><dd>{displayValue(evidence.os_version)}</dd></div>
-                  <div><dt>Architecture</dt><dd>{displayValue(evidence.architecture)}</dd></div>
-                  <div><dt>Kernel version</dt><dd>{displayValue(evidence.kernel_version)}</dd></div>
-                  <div><dt>Symbol table</dt><dd>{displayValue(evidence.symbol_table)}</dd></div>
-                  <div><dt>Acquisition tool</dt><dd>{displayValue(evidence.acquisition_tool)}</dd></div>
-                  <div><dt>Acquisition time</dt><dd>{formatDateTime(evidence.acquisition_time)}</dd></div>
-                  <div><dt>Size</dt><dd>{formatBytes(evidence.size_bytes)}</dd></div>
-                  <div><dt>MD5</dt><dd><code title={evidence.md5 ?? undefined}>{shortHash(evidence.md5)}</code></dd></div>
-                  <div><dt>SHA256</dt><dd><code title={evidence.sha256 ?? undefined}>{shortHash(evidence.sha256)}</code></dd></div>
-                </dl>
-              </article>
-            ))}
+            {evidences.map((evidence) => {
+              const selectedProfile = selectedProfileForEvidence(evidence);
+              const profileAvailable = supportsWindowsAnalysisProfiles(evidence);
+              const isStarting = startingEvidenceId === evidence.id;
+
+              return (
+                <article className="item-panel" key={evidence.id}>
+                  <header className="item-panel-header">
+                    <div>
+                      <strong>{evidence.original_filename}</strong>
+                      <span>{displayValue(evidence.source_type)} evidence</span>
+                    </div>
+                    <div className="analysis-start-controls">
+                      <label className="analysis-profile-label">
+                        <span>Analysis profile</span>
+                        <select
+                          aria-label={`Analysis profile for ${evidence.original_filename}`}
+                          disabled={!profileAvailable || isStarting}
+                          value={selectedProfile}
+                          onChange={(event) => {
+                            const value = event.target.value as AnalysisPluginProfile;
+                            setProfileByEvidenceId((current) => ({ ...current, [evidence.id]: value }));
+                          }}
+                        >
+                          {ANALYSIS_PROFILE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <p className="field-help profile-help">{profileHelpText(evidence, selectedProfile)}</p>
+                      <Button
+                        disabled={!profileAvailable || isStarting}
+                        type="button"
+                        onClick={() => void handleStartAnalysis(evidence)}
+                      >
+                        {!profileAvailable ? "Profile unavailable" : isStarting ? "Starting..." : "Start analysis"}
+                      </Button>
+                    </div>
+                  </header>
+                  <dl className="metadata-list metadata-list-wide">
+                    <div><dt>OS family</dt><dd>{displayValue(evidence.os_family)}</dd></div>
+                    <div><dt>OS version</dt><dd>{displayValue(evidence.os_version)}</dd></div>
+                    <div><dt>Architecture</dt><dd>{displayValue(evidence.architecture)}</dd></div>
+                    <div><dt>Kernel version</dt><dd>{displayValue(evidence.kernel_version)}</dd></div>
+                    <div><dt>Symbol table</dt><dd>{displayValue(evidence.symbol_table)}</dd></div>
+                    <div><dt>Acquisition tool</dt><dd>{displayValue(evidence.acquisition_tool)}</dd></div>
+                    <div><dt>Acquisition time</dt><dd>{formatDateTime(evidence.acquisition_time)}</dd></div>
+                    <div><dt>Size</dt><dd>{formatBytes(evidence.size_bytes)}</dd></div>
+                    <div><dt>MD5</dt><dd><code title={evidence.md5 ?? undefined}>{shortHash(evidence.md5)}</code></dd></div>
+                    <div><dt>SHA256</dt><dd><code title={evidence.sha256 ?? undefined}>{shortHash(evidence.sha256)}</code></dd></div>
+                  </dl>
+                </article>
+              );
+            })}
           </div>
         )}
       </Card>
@@ -190,6 +262,7 @@ export function CaseDetailPage() {
                 <th>Status</th>
                 <th>Evidence</th>
                 <th>OS</th>
+                <th>Profile</th>
                 <th>Updated</th>
                 <th>Duration</th>
                 <th>Monitor</th>
@@ -201,6 +274,7 @@ export function CaseDetailPage() {
                   <td><Badge tone={statusTone(job.status)}>{job.status}</Badge></td>
                   <td>{evidenceNameById.get(job.evidence_id) ?? job.evidence_id}</td>
                   <td>{displayValue(job.os_family)}</td>
+                  <td>{profileLabel(job.plugin_profile)}</td>
                   <td>{formatDateTime(job.updated_at)}</td>
                   <td>{job.duration_ms === null ? "Not recorded" : `${job.duration_ms} ms`}</td>
                   <td>

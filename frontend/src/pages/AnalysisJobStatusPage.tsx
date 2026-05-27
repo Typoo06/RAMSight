@@ -43,6 +43,23 @@ function terminalResultEmptyMessage(jobStatus: string, completedMessage: string)
   return completedMessage;
 }
 
+function normalizedPluginProfile(profile: string | null | undefined): string | null {
+  const normalized = (profile ?? "").trim().toLowerCase();
+  if (!normalized || normalized === "not recorded") return null;
+  return normalized;
+}
+
+function yaraStatusMessage(job: AnalysisJob, hasYaraResults: boolean): string {
+  const pluginProfile = normalizedPluginProfile(job.plugin_profile);
+  if (!pluginProfile) return "No YARA profile was recorded for this job.";
+  if (pluginProfile === "windows_default") return "YARA was not selected for this analysis profile.";
+  if (pluginProfile === "windows_memory_yara" && hasYaraResults) return "YARA-related results are available below.";
+  if (pluginProfile === "windows_memory_yara") {
+    return "YARA was requested, but exact skipped/no-match status is not available through the current results APIs.";
+  }
+  return "YARA status is not available for this analysis profile.";
+}
+
 export function AnalysisJobStatusPage() {
   const { caseId, jobId } = useParams();
   const [error, setError] = useState<string | null>(null);
@@ -185,6 +202,7 @@ export function AnalysisJobStatusPage() {
   const moduleIocs = useMemo(() => iocs.filter(isModuleOrPathIOC), [iocs]);
   const memoryIocs = useMemo(() => iocs.filter(isMemoryRegionIOC), [iocs]);
   const yaraIocs = useMemo(() => iocs.filter(isYaraIOC), [iocs]);
+  const yaraMessage = job ? yaraStatusMessage(job, yaraFindings.length > 0 || yaraIocs.length > 0) : "No YARA profile was recorded for this job.";
 
   if (!caseId || !jobId) return <ErrorState message="RAMSight could not identify the requested analysis job." />;
   if (loading) return <LoadingState label="Loading RAMSight analysis job..." />;
@@ -306,9 +324,10 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading || iocLoading}
         error={findingError || iocError}
         empty={yaraFindings.length === 0 && yaraIocs.length === 0}
-        emptyMessage={terminalResultEmptyMessage(job.status, "No YARA findings or YARA IOC records are available for this job.")}
+        emptyMessage={yaraMessage}
       >
         <div className="page-stack compact-stack">
+          <p className="section-note">{yaraMessage}</p>
           {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={20} />}
           {yaraIocs.length > 0 && <IocTable caption="YARA IOC records" iocs={yaraIocs} limit={50} />}
         </div>
