@@ -5,8 +5,9 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine, insert, select, update
 
-from app.db.tables import analysis_jobs, metadata, plugin_results
+from app.db.tables import analysis_jobs, cases, evidences, metadata, plugin_results
 from app.parsers.persistence import update_plugin_result_parse_error
+from app.reports.persistence import load_report_data
 from app.tasks import status as task_status
 from app.tasks.analysis import (
     STATUS_COMPLETED,
@@ -14,6 +15,7 @@ from app.tasks.analysis import (
     claim_queued_job,
     evidence_download_path,
     insert_plugin_result,
+    mark_job_completed,
 )
 from app.utils.workspace import isolated_job_workspace
 from app.volatility.runner import VolatilityRunResult
@@ -68,6 +70,59 @@ def test_claim_queued_job_only_claims_queued_jobs() -> None:
     assert completed_claim.claimed is False
     assert completed_claim.status == STATUS_COMPLETED
     assert stored_status == "running"
+
+
+def test_report_data_reads_final_status_after_completion_update() -> None:
+    engine = create_engine("sqlite://")
+    metadata.create_all(engine)
+    now = datetime.now(timezone.utc)
+    completed_at = datetime(2026, 5, 24, 12, 30, tzinfo=timezone.utc)
+    case_id = uuid4()
+    evidence_id = uuid4()
+    job_id = uuid4()
+
+    with engine.begin() as conn:
+        conn.execute(
+            insert(cases).values(
+                id=case_id,
+                case_code="CASE-REPORT-FINAL",
+                name="Report final status",
+                status="open",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        conn.execute(
+            insert(evidences).values(
+                id=evidence_id,
+                case_id=case_id,
+                source_type="upload",
+                original_filename="memory.raw",
+                os_family="windows",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        conn.execute(
+            insert(analysis_jobs).values(
+                id=job_id,
+                case_id=case_id,
+                evidence_id=evidence_id,
+                status=task_status.STATUS_RUNNING,
+                os_family="windows",
+                started_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        mark_job_completed(conn, job_id, completed_at=completed_at, duration_ms=4321)
+        report_context = load_report_data(conn, job_id, generated_at=completed_at)
+
+    assert report_context["analysis_job"]["status"] == STATUS_COMPLETED
+    assert report_context["analysis_job"]["duration_ms"] == 4321
+    stored_completed_at = report_context["analysis_job"]["completed_at"]
+    assert stored_completed_at is not None
+    assert stored_completed_at.replace(tzinfo=timezone.utc) == completed_at
 
 
 def test_insert_plugin_result_preserves_yara_visibility_metadata() -> None:

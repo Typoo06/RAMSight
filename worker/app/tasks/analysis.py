@@ -328,6 +328,12 @@ def run_analysis_job(job_id: str) -> dict:
                     LOGGER.warning("IOC extraction failed for job %s: %s", parsed_job_id, error_message)
                     ioc_export_keys = {"error": error_message}
 
+                completed_at = utc_now()
+                elapsed_ms = duration_ms_since(task_started)
+                with engine.begin() as conn:
+                    mark_job_completed(conn, parsed_job_id, completed_at, elapsed_ms)
+                job_status = STATUS_COMPLETED
+
                 try:
                     with engine.begin() as conn:
                         generated_report = run_html_report_generation_for_job(
@@ -346,15 +352,11 @@ def run_analysis_job(job_id: str) -> dict:
                     error_message = short_error_message(exc)
                     LOGGER.warning("HTML report generation failed for job %s: %s", parsed_job_id, error_message)
                     report_result = {"error": error_message}
-
-        completed_at = utc_now()
-        elapsed_ms = duration_ms_since(task_started)
-        with engine.begin() as conn:
-            if successful_plugins > 0:
-                mark_job_completed(conn, parsed_job_id, completed_at, elapsed_ms)
-                job_status = STATUS_COMPLETED
             else:
-                mark_job_failed(conn, parsed_job_id, "all selected Volatility plugins failed", completed_at, elapsed_ms)
+                completed_at = utc_now()
+                elapsed_ms = duration_ms_since(task_started)
+                with engine.begin() as conn:
+                    mark_job_failed(conn, parsed_job_id, "all selected Volatility plugins failed", completed_at, elapsed_ms)
                 job_status = STATUS_FAILED
 
         return {

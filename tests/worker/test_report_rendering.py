@@ -19,10 +19,19 @@ def test_html_rendering_escapes_untrusted_values_and_includes_sections() -> None
     case_id = uuid4()
     evidence_id = uuid4()
     job_id = uuid4()
+    completed_at = datetime(2026, 5, 24, 12, 30, tzinfo=timezone.utc)
     context = build_report_context(
         case={"id": case_id, "case_code": "CASE-<1>", "name": "<script>alert(1)</script>", "status": "open"},
         evidence={"id": evidence_id, "case_id": case_id, "original_filename": "memory.raw", "source_type": "upload", "md5": "a" * 32, "sha256": "b" * 64, "os_family": "windows"},
-        analysis_job={"id": job_id, "case_id": case_id, "evidence_id": evidence_id, "status": "completed", "os_family": "windows"},
+        analysis_job={
+            "id": job_id,
+            "case_id": case_id,
+            "evidence_id": evidence_id,
+            "status": "completed",
+            "os_family": "windows",
+            "duration_ms": 1234,
+            "completed_at": completed_at,
+        },
         plugin_results=[
             {
                 "plugin_name": "windows.pslist",
@@ -47,4 +56,8 @@ def test_html_rendering_escapes_untrusted_values_and_includes_sections() -> None
     assert "powershell &lt;bad&gt;" in html
     assert "case-a/job-b/raw/windows_pslist.json" in html
     assert "case-a/job-b/parsed/windows_pslist.json" in html
+    assert "<th>Job ID</th>" in html
+    assert "<th>Status</th><td>completed</td>" in html
+    assert "<th>Duration ms</th><td>1234</td>" in html
+    assert f"<th>Completed</th><td>{completed_at}</td>" in html
     assert "<script>alert(1)</script>" not in html
