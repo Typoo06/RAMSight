@@ -140,6 +140,27 @@ def yara_rule_summary(components: list[FindingDraft]) -> tuple[list[str], int]:
     return sorted(rule_names), sum(grouped.values())
 
 
+def extra_flag_enabled(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    return str(value).strip().lower() in {"true", "yes", "1"}
+
+
+def has_high_confidence_yara(components: list[FindingDraft]) -> bool:
+    for component in components:
+        if "yara_match" not in evidence_groups_for_finding(component):
+            continue
+        extra_data = component.extra_data or {}
+        confidence = normalize_text(extra_data.get("confidence"))
+        noisy = extra_flag_enabled(extra_data.get("noisy", False))
+        severity = normalize_text(extra_data.get("triage_severity")) or normalize_text(component.severity)
+        if confidence in {"high", "confirmed"} and not noisy and severity in {"high", "critical"}:
+            return True
+    return False
+
+
 def score_by_independent_evidence_groups(components: list[FindingDraft]) -> tuple[int, set[str]]:
     group_scores: dict[str, int] = {}
     evidence_groups = set()
@@ -200,7 +221,8 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         if severity == "critical" and "yara_match" in evidence_groups:
             has_memory = "memory_region" in evidence_groups
             has_strong_context = bool(evidence_groups & {"network_endpoint", "suspicious_command", "suspicious_module"})
-            if not (has_memory and has_strong_context):
+            has_strong_yara = has_high_confidence_yara(selected)
+            if not (has_memory and (has_strong_context or has_strong_yara)):
                 severity = "high"
         first = selected[0]
         first_extra = first.extra_data or {}
@@ -259,7 +281,8 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
                     "memory_region_count": memory_region_count,
                     "network_endpoint_count": network_endpoint_count,
                     "yara_rule_count": yara_match_count,
-                    "yara_match_count": raw_yara_match_count,
+                    "yara_match_count": yara_match_count,
+                    "yara_raw_match_count": raw_yara_match_count,
                     "yara_rules": yara_rules,
                 },
             )

@@ -144,7 +144,7 @@ export function findingEvidenceContext(finding: RiskFinding): string[] {
       ["components", firstContextText([extraData], ["unique_component_count"])],
       ["regions", firstContextText([extraData], ["memory_region_count"])],
       ["endpoints", firstContextText([extraData], ["network_endpoint_count"])],
-      ["YARA", firstContextText([extraData], ["yara_match_count"])],
+      ["YARA rules", firstContextText([extraData], ["yara_rule_count", "yara_match_count"])],
     ]
       .filter(([, value]) => value)
       .map(([label, value]) => `${label} ${value}`);

@@ -173,14 +173,14 @@ def test_yara_match_finding_supports_critical_metadata() -> None:
     assert findings[0].score == 13
 
 
-def test_yara_match_findings_are_grouped_per_process_and_rule() -> None:
+def test_broad_demo_yara_matches_are_summarized_per_rule() -> None:
     yara_rows = [
         {
             "id": uuid4(),
             "source_plugin": "windows.vadyarascan",
             "rule_name": "RAMSight_Demo_PE_Header_In_Memory_Candidate",
             "target_type": "process_memory",
-            "target_identifier": "PID 484",
+            "target_identifier": f"PID {400 + index}",
             "offset": 0x1000 + index,
             "extra_data": {"offset_raw": hex(0x1000 + index)},
         }
@@ -193,11 +193,46 @@ def test_yara_match_findings_are_grouped_per_process_and_rule() -> None:
     assert len(findings) == 1
     assert len(artifacts[YARA_TABLE]) == 10
     assert findings[0].severity == "low"
-    assert findings[0].extra_data["pid"] == 484
+    assert findings[0].title == "YARA triage summary: RAMSight_Demo_PE_Header_In_Memory_Candidate"
     assert findings[0].extra_data["rule_name"] == "RAMSight_Demo_PE_Header_In_Memory_Candidate"
-    assert findings[0].extra_data["yara_match_count"] == 10
+    assert findings[0].extra_data["affected_pid_count"] == 10
+    assert findings[0].extra_data["total_match_count"] == 10
+    assert findings[0].extra_data["sample_pids"] == [400, 401, 402, 403, 404]
     assert findings[0].extra_data["sample_offsets"] == ["0x1000", "0x1001", "0x1002", "0x1003", "0x1004"]
     assert len(findings[0].extra_data["yara_match_artifact_ids"]) == 10
+    assert findings[0].extra_data["noisy"] is True
+    assert findings[0].extra_data["requires_correlation"] is True
+
+
+def test_high_confidence_non_noisy_yara_can_emit_per_process_findings() -> None:
+    artifacts = {
+        YARA_TABLE: [
+            {
+                "id": uuid4(),
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": "Analyst_High_Confidence_Memory_Rule",
+                "target_type": "process_memory",
+                "target_identifier": "PID 1200",
+                "offset": 0x5000,
+                "extra_data": {"severity": "high", "confidence": "high", "noisy": False, "requires_correlation": False},
+            },
+            {
+                "id": uuid4(),
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": "Analyst_High_Confidence_Memory_Rule",
+                "target_type": "process_memory",
+                "target_identifier": "PID 1300",
+                "offset": 0x6000,
+                "extra_data": {"severity": "high", "confidence": "high", "noisy": False, "requires_correlation": False},
+            },
+        ]
+    }
+
+    findings = evaluate_rules([rule_by_id("YARA_MATCH")], artifacts, context())
+
+    assert len(findings) == 2
+    assert {finding.extra_data["pid"] for finding in findings} == {1200, 1300}
+    assert {finding.severity for finding in findings} == {"high"}
 
 
 def test_psscan_only_hidden_process_candidate_compares_by_pid() -> None:
@@ -476,8 +511,32 @@ def test_process_risk_summary_counts_unique_yara_rules_not_offsets() -> None:
     assert summaries[0].severity == "high"
     assert summaries[0].extra_data["unique_component_count"] == 2
     assert summaries[0].extra_data["yara_rule_count"] == 1
-    assert summaries[0].extra_data["yara_match_count"] == 12
+    assert summaries[0].extra_data["yara_match_count"] == 1
+    assert summaries[0].extra_data["yara_raw_match_count"] == 12
     assert summaries[0].extra_data["yara_rules"] == ["RAMSight_Demo_Injection_API_Cluster"]
+
+
+def test_yara_only_demo_matches_do_not_create_process_critical_summaries() -> None:
+    yara_rows = [
+        {
+            "id": uuid4(),
+            "source_plugin": "windows.vadyarascan",
+            "rule_name": "RAMSight_Demo_PE_Header_In_Memory_Candidate",
+            "target_type": "process_memory",
+            "target_identifier": f"PID {600 + index}",
+            "offset": 0x700000 + index,
+        }
+        for index in range(30)
+    ]
+
+    findings = evaluate_rules([rule_by_id("YARA_MATCH"), rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")], {YARA_TABLE: yara_rows}, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    assert len(findings) == 1
+    assert findings[0].category == "yara"
+    assert findings[0].severity == "low"
+    assert findings[0].extra_data["total_match_count"] == 30
+    assert summaries == []
 
 
 def test_yara_memory_and_network_correlation_can_be_critical() -> None:
@@ -509,6 +568,39 @@ def test_yara_memory_and_network_correlation_can_be_critical() -> None:
     assert summaries[0].extra_data["memory_region_count"] == 1
     assert summaries[0].extra_data["network_endpoint_count"] == 1
     assert summaries[0].extra_data["yara_rule_count"] == 1
+    assert summaries[0].extra_data["yara_raw_match_count"] == 1
+
+
+def test_high_confidence_yara_and_memory_can_be_critical() -> None:
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        YARA_TABLE: [
+            {
+                "id": uuid4(),
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": "Analyst_High_Confidence_Memory_Rule",
+                "target_type": "process_memory",
+                "target_identifier": "2924",
+                "offset": 0x500000,
+                "extra_data": {
+                    "severity": "high",
+                    "confidence": "high",
+                    "noisy": False,
+                    "requires_correlation": False,
+                },
+            }
+        ],
+    }
+    rules = [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")]
+
+    findings = evaluate_rules(rules, artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    assert len(summaries) == 1
+    assert summaries[0].severity == "critical"
+    assert summaries[0].extra_data["memory_region_count"] == 1
+    assert summaries[0].extra_data["yara_rule_count"] == 1
+    assert summaries[0].extra_data["yara_raw_match_count"] == 1
 
 
 def test_critical_process_summary_requires_independent_evidence_categories() -> None:

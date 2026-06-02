@@ -340,6 +340,20 @@ def yara_risk_from_metadata(rule: DetectionRule, artifacts: list[dict], correlat
     return severity, YARA_SEVERITY_SCORES.get(severity, rule.score)
 
 
+def yara_is_high_confidence(metadata: dict) -> bool:
+    confidence = str(metadata.get("confidence") or "").lower()
+    noisy = truthy_metadata_value(metadata.get("noisy", False))
+    return confidence in {"high", "confirmed"} and not noisy
+
+
+def yara_should_use_job_summary(metadata: dict, correlated: bool = False) -> bool:
+    if yara_is_high_confidence(metadata):
+        return False
+    noisy = truthy_metadata_value(metadata.get("noisy", False))
+    requires_correlation = truthy_metadata_value(metadata.get("requires_correlation", False))
+    return noisy or (requires_correlation and not correlated)
+
+
 def display_yara_offset(artifact: dict) -> str | None:
     extra_data = artifact.get("extra_data") or {}
     raw_offset = extra_data.get("offset_raw")
@@ -402,6 +416,62 @@ def group_yara_matches(
     return list(grouped.values())
 
 
+def group_yara_matches_by_rule(artifacts: list[dict], context: dict) -> list[tuple[dict, list[dict]]]:
+    grouped: dict[tuple, tuple[dict, list[dict]]] = {}
+    for artifact in artifacts:
+        key = (
+            context.get("analysis_job_id"),
+            normalize_key_text(artifact.get("rule_name")),
+            artifact.get("source_plugin"),
+        )
+        if key not in grouped:
+            grouped[key] = (artifact, [])
+        grouped[key][1].append(artifact)
+    return list(grouped.values())
+
+
+def sample_yara_pids(artifacts: list[dict], limit: int = YARA_SAMPLE_OFFSET_LIMIT) -> list[int]:
+    pids = []
+    seen = set()
+    for artifact in artifacts:
+        pid = parse_pid_candidate(artifact.get("target_identifier"))
+        if pid is None or pid in seen:
+            continue
+        seen.add(pid)
+        pids.append(pid)
+        if len(pids) >= limit:
+            break
+    return pids
+
+
+def count_yara_affected_pids(artifacts: list[dict]) -> int:
+    values = {parse_pid_candidate(artifact.get("target_identifier")) for artifact in artifacts}
+    return len({pid for pid in values if pid is not None})
+
+
+def yara_rule_summary_extra(artifacts: list[dict]) -> dict:
+    first = artifacts[0]
+    metadata = yara_metadata(first)
+    return {
+        "rule_name": first.get("rule_name"),
+        "namespace": first.get("namespace"),
+        "tags": first.get("tags"),
+        "source_plugin": first.get("source_plugin"),
+        "affected_pid_count": count_yara_affected_pids(artifacts),
+        "total_match_count": len(artifacts),
+        "sample_pids": sample_yara_pids(artifacts),
+        "sample_offsets": sample_yara_offsets(artifacts),
+        "yara_match_artifact_ids": [str(item.get("id")) for item in artifacts if item.get("id")],
+        "noisy": truthy_metadata_value(metadata.get("noisy", False)),
+        "requires_correlation": truthy_metadata_value(metadata.get("requires_correlation", False)),
+        "confidence": metadata.get("confidence"),
+        "triage_severity": metadata.get("triage_severity") or metadata.get("severity"),
+        "summary_scope": "analysis_job",
+        "reasoning": "Broad YARA matches are summarized by rule to avoid repeated process-level triage noise",
+        "requires_validation": True,
+    }
+
+
 def yara_summary_extra(
     artifacts: list[dict],
     pid: int | None,
@@ -409,6 +479,7 @@ def yara_summary_extra(
     linked_regions: list[dict] | None = None,
 ) -> dict:
     first = artifacts[0]
+    metadata = yara_metadata(first)
     target_identifier = first.get("target_identifier")
     return {
         "pid": pid,
@@ -422,6 +493,10 @@ def yara_summary_extra(
         "sample_offsets": sample_yara_offsets(artifacts),
         "yara_match_artifact_ids": [str(item.get("id")) for item in artifacts if item.get("id")],
         "linked_memory_region_artifact_ids": [str(item.get("id")) for item in linked_regions or [] if item.get("id")],
+        "confidence": metadata.get("confidence"),
+        "noisy": truthy_metadata_value(metadata.get("noisy", False)),
+        "requires_correlation": truthy_metadata_value(metadata.get("requires_correlation", False)),
+        "triage_severity": metadata.get("triage_severity") or metadata.get("severity"),
         "reasoning": "YARA matches are summarized per process and rule to reduce repeated offset noise",
         "requires_validation": True,
     }
@@ -648,7 +723,29 @@ def evaluate_memory_regions(rule: DetectionRule, artifacts: dict[str, list[dict]
 
 def evaluate_yara_matches(rule: DetectionRule, artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
     findings = []
-    for artifact, matches, pid, process_name, linked_regions in group_yara_matches(artifacts.get(YARA_TABLE, []), context):
+    summary_matches = []
+    process_matches = []
+    for artifact in artifacts.get(YARA_TABLE, []):
+        metadata = yara_metadata(artifact)
+        if yara_should_use_job_summary(metadata, correlated=False):
+            summary_matches.append(artifact)
+        else:
+            process_matches.append(artifact)
+
+    for artifact, matches in group_yara_matches_by_rule(summary_matches, context):
+        severity, score = yara_risk_from_metadata(rule, matches, correlated=False)
+        finding = make_finding(
+            rule,
+            context,
+            artifact,
+            f"YARA triage summary: {artifact.get('rule_name')}",
+            f"YARA rule {artifact.get('rule_name')} matched {len(matches)} memory locations; this is a triage indicator requiring analyst validation and correlation.",
+            YARA_TABLE,
+            yara_rule_summary_extra(matches),
+        )
+        findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
+
+    for artifact, matches, pid, process_name, linked_regions in group_yara_matches(process_matches, context):
         process_name = process_name or (None if pid is not None else artifact.get("target_identifier"))
         severity, score = yara_risk_from_metadata(rule, matches, correlated=bool(linked_regions))
         title_identity = process_identity({"pid": pid, "process_name": process_name})
@@ -838,6 +935,9 @@ def evaluate_yara_process_memory(rule: DetectionRule, artifacts: dict[str, list[
         process_memory_matches.append(yara_match)
 
     for yara_match, matches, pid, process_name, linked_regions in group_yara_matches(process_memory_matches, context, memory_by_pid):
+        metadata = yara_metadata(yara_match)
+        if yara_should_use_job_summary(metadata, correlated=bool(linked_regions)):
+            continue
         process_name = process_name or (None if pid is not None else yara_match.get("target_identifier"))
         title_identity = process_identity({"pid": pid, "process_name": process_name})
         severity, score = yara_risk_from_metadata(rule, matches, correlated=bool(linked_regions))
