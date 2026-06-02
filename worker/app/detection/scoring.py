@@ -60,6 +60,15 @@ def process_key_from_finding(finding: FindingDraft) -> tuple | None:
 def component_key(finding: FindingDraft) -> tuple:
     extra_data = finding.extra_data or {}
     linked_artifacts = extra_data.get("linked_artifacts") or {}
+    if finding.rule_id in YARA_RULE_IDS or finding.artifact_type == "yara_matches":
+        return (
+            "yara_match",
+            extra_data.get("pid"),
+            normalize_text(extra_data.get("process_name")),
+            extra_data.get("target_identifier"),
+            normalize_text(extra_data.get("rule_name")),
+            finding.source_plugin,
+        )
     return (
         finding.rule_id,
         finding.category,
@@ -105,8 +114,30 @@ def count_unique_values(components: list[FindingDraft], group_name: str) -> int:
         elif group_name == "network_endpoint":
             values.add((linked_artifacts.get("remote_address") or extra_data.get("remote_address"), linked_artifacts.get("remote_port") or extra_data.get("remote_port")))
         elif group_name == "yara_match":
-            values.add((extra_data.get("rule_name"), extra_data.get("target_identifier"), extra_data.get("offset")))
+            values.add((extra_data.get("rule_name"), extra_data.get("target_identifier"), extra_data.get("pid")))
     return len({value for value in values if any(part is not None for part in value)})
+
+
+def yara_rule_summary(components: list[FindingDraft]) -> tuple[list[str], int]:
+    grouped: dict[tuple, int] = {}
+    rule_names = set()
+    for component in components:
+        if "yara_match" not in evidence_groups_for_finding(component):
+            continue
+        extra_data = component.extra_data or {}
+        rule_name = extra_data.get("rule_name")
+        target_identifier = extra_data.get("target_identifier")
+        pid = extra_data.get("pid")
+        key = (rule_name, target_identifier, pid, normalize_text(extra_data.get("process_name")))
+        if rule_name:
+            rule_names.add(str(rule_name))
+        match_count = extra_data.get("yara_match_count")
+        try:
+            normalized_count = int(match_count)
+        except (TypeError, ValueError):
+            normalized_count = 1
+        grouped[key] = max(grouped.get(key, 0), normalized_count)
+    return sorted(rule_names), sum(grouped.values())
 
 
 def score_by_independent_evidence_groups(components: list[FindingDraft]) -> tuple[int, set[str]]:
@@ -166,6 +197,11 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         severity = severity_for_score(total_score, scoring_config)
         if severity == "critical" and len(evidence_groups) < 2:
             severity = "high"
+        if severity == "critical" and "yara_match" in evidence_groups:
+            has_memory = "memory_region" in evidence_groups
+            has_strong_context = bool(evidence_groups & {"network_endpoint", "suspicious_command", "suspicious_module"})
+            if not (has_memory and has_strong_context):
+                severity = "high"
         first = selected[0]
         first_extra = first.extra_data or {}
         pid = first_extra.get("pid") or next(
@@ -191,6 +227,7 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         memory_region_count = count_unique_values(selected, "memory_region")
         network_endpoint_count = count_unique_values(selected, "network_endpoint")
         yara_match_count = count_unique_values(selected, "yara_match")
+        yara_rules, raw_yara_match_count = yara_rule_summary(selected)
         summaries.append(
             FindingDraft(
                 analysis_job_id=first.analysis_job_id,
@@ -221,7 +258,9 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
                     "evidence_groups": sorted(evidence_groups),
                     "memory_region_count": memory_region_count,
                     "network_endpoint_count": network_endpoint_count,
-                    "yara_match_count": yara_match_count,
+                    "yara_rule_count": yara_match_count,
+                    "yara_match_count": raw_yara_match_count,
+                    "yara_rules": yara_rules,
                 },
             )
         )
