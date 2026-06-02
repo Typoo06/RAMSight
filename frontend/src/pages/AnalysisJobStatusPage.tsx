@@ -1,18 +1,41 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAnalysisJob, getAnalysisJobStatus } from "../api/analysisJobs";
+import {
+  listCommandArtifacts,
+  listMemoryRegionArtifacts,
+  listModuleArtifacts,
+  listNetworkArtifacts,
+  listProcessArtifacts,
+  listYaraMatches,
+} from "../api/artifacts";
 import { iocExportDownloadUrl, listIOCs } from "../api/iocs";
+import { listPluginResults } from "../api/pluginResults";
 import { listReports } from "../api/reports";
 import { listRiskFindings } from "../api/riskFindings";
+import { ArtifactDrilldown, MemoryRegionTable, YaraMatchTable } from "../components/results/ArtifactDrilldown";
 import { FindingTable } from "../components/results/FindingTable";
 import { IocTable } from "../components/results/IocTable";
+import { PluginResultTable } from "../components/results/PluginResultTable";
 import { ReportSection } from "../components/results/ReportSection";
 import { ResultSection } from "../components/results/ResultSection";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
-import type { AnalysisJob, IOC, Report, RiskFinding } from "../types/domain";
+import type {
+  AnalysisJob,
+  CommandArtifact,
+  IOC,
+  MemoryRegionArtifact,
+  ModuleArtifact,
+  NetworkArtifact,
+  PluginResult,
+  ProcessArtifact,
+  Report,
+  RiskFinding,
+  YaraMatchArtifact,
+} from "../types/domain";
 import { displayValue, formatDateTime } from "../utils/format";
 import {
   isMemoryRegionFinding,
@@ -60,20 +83,79 @@ function yaraStatusMessage(job: AnalysisJob, hasYaraResults: boolean): string {
   return "YARA status is not available for this analysis profile.";
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function numericPid(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  return Number(trimmed);
+}
+
+function pidFromTargetIdentifier(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const exact = trimmed.match(/^\d+$/);
+  if (exact) return Number(exact[0]);
+  const pidLabel = trimmed.match(/^pid\s+(\d+)$/i);
+  return pidLabel ? Number(pidLabel[1]) : null;
+}
+
+function collectPidOptions(
+  findings: RiskFinding[],
+  processes: ProcessArtifact[],
+  commands: CommandArtifact[],
+  networks: NetworkArtifact[],
+  modules: ModuleArtifact[],
+  memoryRegions: MemoryRegionArtifact[],
+  yaraMatches: YaraMatchArtifact[],
+): number[] {
+  const values = new Set<number>();
+  for (const finding of findings) {
+    const extraData = asRecord(finding.extra_data);
+    const linkedArtifacts = asRecord(extraData.linked_artifacts);
+    const pid = numericPid(extraData.pid) ?? numericPid(linkedArtifacts.pid);
+    if (pid !== null) values.add(pid);
+  }
+  for (const row of [...processes, ...commands, ...networks, ...modules, ...memoryRegions]) {
+    if (row.pid !== null) values.add(row.pid);
+  }
+  for (const match of yaraMatches) {
+    const extraData = asRecord(match.extra_data);
+    const pid = numericPid(extraData.pid) ?? numericPid(extraData.process_id) ?? pidFromTargetIdentifier(match.target_identifier);
+    if (pid !== null) values.add(pid);
+  }
+  return [...values].sort((left, right) => left - right);
+}
+
 export function AnalysisJobStatusPage() {
   const { caseId, jobId } = useParams();
   const [error, setError] = useState<string | null>(null);
+  const [commandArtifacts, setCommandArtifacts] = useState<CommandArtifact[]>([]);
+  const [drilldownError, setDrilldownError] = useState<string | null>(null);
+  const [drilldownLoading, setDrilldownLoading] = useState(true);
   const [findingError, setFindingError] = useState<string | null>(null);
   const [findingLoading, setFindingLoading] = useState(true);
   const [findings, setFindings] = useState<RiskFinding[]>([]);
+  const [focusPidText, setFocusPidText] = useState("");
   const [iocError, setIocError] = useState<string | null>(null);
   const [iocLoading, setIocLoading] = useState(true);
   const [iocs, setIocs] = useState<IOC[]>([]);
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [loading, setLoading] = useState(true);
+  const [memoryRegions, setMemoryRegions] = useState<MemoryRegionArtifact[]>([]);
+  const [moduleArtifacts, setModuleArtifacts] = useState<ModuleArtifact[]>([]);
+  const [networkArtifacts, setNetworkArtifacts] = useState<NetworkArtifact[]>([]);
+  const [pluginResults, setPluginResults] = useState<PluginResult[]>([]);
+  const [processArtifacts, setProcessArtifacts] = useState<ProcessArtifact[]>([]);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reports, setReports] = useState<Report[]>([]);
+  const [yaraMatches, setYaraMatches] = useState<YaraMatchArtifact[]>([]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -92,6 +174,73 @@ export function AnalysisJobStatusPage() {
       active = false;
     };
   }, [jobId]);
+
+  const focusPid = useMemo(() => {
+    const trimmed = focusPidText.trim();
+    if (!trimmed) return null;
+    const pid = numericPid(trimmed);
+    return pid !== null && pid >= 0 ? pid : null;
+  }, [focusPidText]);
+  const focusPidError = "Focus PID must be a non-negative integer.";
+  const focusPidInvalid = focusPidText.trim() !== "" && focusPid === null;
+  const drilldownSectionLoading = focusPidInvalid ? false : drilldownLoading;
+  const drilldownSectionError = focusPidInvalid ? focusPidError : drilldownError;
+
+  useEffect(() => {
+    if (!jobId) return;
+    if (focusPidInvalid) return;
+
+    let active = true;
+    const artifactFilters = focusPid === null ? { limit: 100 } : { pid: focusPid, limit: 100 };
+
+    Promise.resolve().then(() => {
+      if (!active) return null;
+      setDrilldownLoading(true);
+      setDrilldownError(null);
+      return Promise.allSettled([
+      listPluginResults(jobId, { limit: 100 }),
+      listProcessArtifacts(jobId, artifactFilters),
+      listCommandArtifacts(jobId, artifactFilters),
+      listNetworkArtifacts(jobId, artifactFilters),
+      listModuleArtifacts(jobId, artifactFilters),
+      listMemoryRegionArtifacts(jobId, artifactFilters),
+      listYaraMatches(jobId, artifactFilters),
+      ]);
+    }).then((results) => {
+      if (!results) return;
+      if (!active) return;
+      const [pluginResult, processResult, commandResult, networkResult, moduleResult, memoryResult, yaraResult] = results;
+      const errors: string[] = [];
+
+      if (pluginResult.status === "fulfilled") setPluginResults(pluginResult.value.items);
+      else errors.push(pluginResult.reason instanceof Error ? pluginResult.reason.message : "RAMSight could not load plugin results.");
+
+      if (processResult.status === "fulfilled") setProcessArtifacts(processResult.value.items);
+      else errors.push(processResult.reason instanceof Error ? processResult.reason.message : "RAMSight could not load process artifacts.");
+
+      if (commandResult.status === "fulfilled") setCommandArtifacts(commandResult.value.items);
+      else errors.push(commandResult.reason instanceof Error ? commandResult.reason.message : "RAMSight could not load command artifacts.");
+
+      if (networkResult.status === "fulfilled") setNetworkArtifacts(networkResult.value.items);
+      else errors.push(networkResult.reason instanceof Error ? networkResult.reason.message : "RAMSight could not load network artifacts.");
+
+      if (moduleResult.status === "fulfilled") setModuleArtifacts(moduleResult.value.items);
+      else errors.push(moduleResult.reason instanceof Error ? moduleResult.reason.message : "RAMSight could not load module artifacts.");
+
+      if (memoryResult.status === "fulfilled") setMemoryRegions(memoryResult.value.items);
+      else errors.push(memoryResult.reason instanceof Error ? memoryResult.reason.message : "RAMSight could not load memory region artifacts.");
+
+      if (yaraResult.status === "fulfilled") setYaraMatches(yaraResult.value.items);
+      else errors.push(yaraResult.reason instanceof Error ? yaraResult.reason.message : "RAMSight could not load YARA match artifacts.");
+
+      setDrilldownError(errors[0] ?? null);
+      setDrilldownLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [focusPid, focusPidInvalid, job?.status, jobId]);
 
   useEffect(() => {
     if (!jobId || !job || isActiveJobStatus(job.status)) return;
@@ -203,6 +352,11 @@ export function AnalysisJobStatusPage() {
   const memoryIocs = useMemo(() => iocs.filter(isMemoryRegionIOC), [iocs]);
   const yaraIocs = useMemo(() => iocs.filter(isYaraIOC), [iocs]);
   const yaraMessage = job ? yaraStatusMessage(job, yaraFindings.length > 0 || yaraIocs.length > 0) : "No YARA profile was recorded for this job.";
+  const pidOptions = useMemo(
+    () => collectPidOptions(findings, processArtifacts, commandArtifacts, networkArtifacts, moduleArtifacts, memoryRegions, yaraMatches),
+    [commandArtifacts, findings, memoryRegions, moduleArtifacts, networkArtifacts, processArtifacts, yaraMatches],
+  );
+  const focusedArtifactCount = processArtifacts.length + commandArtifacts.length + networkArtifacts.length + moduleArtifacts.length + memoryRegions.length + yaraMatches.length;
   const iocExportActions = job ? (
     <div className="button-row">
       <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "json")}>Download IOC JSON</a>
@@ -340,6 +494,75 @@ export function AnalysisJobStatusPage() {
       </ResultSection>
 
       <ResultSection
+        title="Plugin results"
+        loading={drilldownSectionLoading}
+        error={drilldownSectionError}
+        empty={pluginResults.length === 0}
+        emptyMessage={terminalResultEmptyMessage(job.status, "No plugin result metadata is available for this job.")}
+      >
+        <PluginResultTable pluginResults={pluginResults} />
+      </ResultSection>
+
+      <Card title="Artifact drill-down filter">
+        <div className="filter-row">
+          <label>
+            <span>Focus PID</span>
+            <input
+              list="artifact-pid-options"
+              inputMode="numeric"
+              placeholder="Example: 340"
+              value={focusPidText}
+              onChange={(event) => setFocusPidText(event.target.value)}
+            />
+          </label>
+          <button className="button button-secondary" type="button" onClick={() => setFocusPidText("")}>Clear</button>
+        </div>
+        <datalist id="artifact-pid-options">
+          {pidOptions.map((pid) => <option key={pid} value={pid} />)}
+        </datalist>
+        {focusPidInvalid && <p className="error-text">{focusPidError}</p>}
+        <p className="muted">Use Focus PID to inspect process, command, network, module, memory-region, and YARA artifacts for one process. RAMSight shows stored metadata only, not raw memory dump content.</p>
+      </Card>
+
+      <ResultSection
+        title="Memory region detail"
+        loading={drilldownSectionLoading}
+        error={drilldownSectionError}
+        empty={memoryRegions.length === 0}
+        emptyMessage={terminalResultEmptyMessage(job.status, "No memory-region artifacts are available for this job.")}
+      >
+        <MemoryRegionTable caption={focusPid === null ? "Memory region artifacts" : `Memory region artifacts for PID ${focusPid}`} memoryRegions={memoryRegions} limit={50} />
+      </ResultSection>
+
+      <ResultSection
+        title="YARA match detail"
+        loading={drilldownSectionLoading}
+        error={drilldownSectionError}
+        empty={yaraMatches.length === 0}
+        emptyMessage={terminalResultEmptyMessage(job.status, "No YARA matches were parsed for this job.")}
+      >
+        <YaraMatchTable caption={focusPid === null ? "YARA match artifacts" : `YARA match artifacts for PID ${focusPid}`} yaraMatches={yaraMatches} limit={50} />
+      </ResultSection>
+
+      <ResultSection
+        title="Process-centered evidence"
+        loading={drilldownSectionLoading}
+        error={drilldownSectionError}
+        empty={focusPid !== null && focusedArtifactCount === 0}
+        emptyMessage={`No normalized artifacts are available for PID ${focusPid}.`}
+      >
+        <ArtifactDrilldown
+          commandArtifacts={commandArtifacts}
+          focusPid={focusPid}
+          memoryRegions={memoryRegions}
+          moduleArtifacts={moduleArtifacts}
+          networkArtifacts={networkArtifacts}
+          processArtifacts={processArtifacts}
+          yaraMatches={yaraMatches}
+        />
+      </ResultSection>
+
+      <ResultSection
         title="IOC table"
         actions={iocExportActions}
         loading={iocLoading}
@@ -362,10 +585,6 @@ export function AnalysisJobStatusPage() {
       >
         <ReportSection reports={reports} />
       </ResultSection>
-
-      <Card title="Plugin and artifact references">
-        <p className="muted">Plugin result rows, raw output references, parsed output references, and normalized artifact tables need dedicated backend query endpoints before RAMSight can render them here. No placeholder data is shown.</p>
-      </Card>
 
       <Card title="Current workflow">
         <ol className="timeline-list">

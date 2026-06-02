@@ -16,6 +16,14 @@ def test_expected_routes_are_registered() -> None:
     assert "/api/v1/analysis-jobs" in routes
     assert "/api/v1/analysis-jobs/{job_id}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/status" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/plugin-results" in routes
+    assert "/api/v1/plugin-results/{plugin_result_id}" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/processes" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/commands" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/network" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/modules" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/memory-regions" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/yara-matches" in routes
     assert "/api/v1/analysis-jobs/{job_id}/iocs/export.json" in routes
     assert "/api/v1/analysis-jobs/{job_id}/iocs/export.csv" in routes
     assert "/api/v1/analysis-jobs/{job_id}/iocs/export.{export_format}" in routes
