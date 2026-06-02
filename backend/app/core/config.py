@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    cors_allowed_origins: list[str] = Field(
+        default=["http://localhost:5173", "http://127.0.0.1:5173"],
+        alias="CORS_ALLOWED_ORIGINS",
+    )
 
     database_url: str = Field(
         default="postgresql+psycopg://memory_triage:change-me@postgres:5432/memory_triage",
@@ -31,6 +35,13 @@ class Settings(BaseSettings):
     minio_bucket_raw_outputs: str = Field(default="raw-outputs", alias="MINIO_BUCKET_RAW_OUTPUTS")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     evidence_max_upload_bytes: int = Field(default=21474836480, alias="EVIDENCE_MAX_UPLOAD_BYTES")
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def parse_cors_allowed_origins(cls, value):
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
 
 @lru_cache

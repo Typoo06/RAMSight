@@ -1,5 +1,6 @@
 # Analysis job service functions.
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -8,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.models import AnalysisJob, Case, Evidence
 from app.models.enums import AnalysisJobStatus
 from app.schemas.analysis_job import AnalysisJobCreate
-from app.services.errors import NotFoundError, ValidationError
-from app.services.job_dispatcher import AnalysisJobDispatcher
+from app.services.errors import NotFoundError, ServiceUnavailableError, ValidationError
+from app.services.job_dispatcher import AnalysisJobDispatchError, AnalysisJobDispatcher
 
 
 def create_analysis_job(db: Session, data: AnalysisJobCreate, dispatcher: AnalysisJobDispatcher) -> AnalysisJob:
@@ -38,7 +39,16 @@ def create_analysis_job(db: Session, data: AnalysisJobCreate, dispatcher: Analys
     db.add(job)
     db.commit()
     db.refresh(job)
-    dispatcher.dispatch(job.id)
+    try:
+        dispatcher.dispatch(job.id)
+    except AnalysisJobDispatchError as exc:
+        job.status = AnalysisJobStatus.FAILED.value
+        job.error_message = str(exc)
+        job.completed_at = datetime.now(timezone.utc)
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        raise ServiceUnavailableError(str(exc)) from exc
     return job
 
 

@@ -1,6 +1,6 @@
 # Model metadata registration tests.
 
-from sqlalchemy import Uuid
+from sqlalchemy import BigInteger, Uuid
 
 from app.models import Base
 
@@ -70,3 +70,9 @@ def test_os_aware_tables_have_expected_fields() -> None:
 def test_mutable_status_tables_have_updated_at() -> None:
     for table_name in ["analysis_jobs", "plugin_results", "reports", "risk_findings", "iocs"]:
         assert "updated_at" in Base.metadata.tables[table_name].columns
+
+
+def test_yara_match_offset_uses_big_integer() -> None:
+    offset_column = Base.metadata.tables["yara_matches"].columns["offset"]
+
+    assert isinstance(offset_column.type, BigInteger)

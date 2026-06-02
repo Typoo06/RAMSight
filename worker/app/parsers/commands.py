@@ -1,11 +1,13 @@
 # Command artifact parsers.
 
-from app.parsers.common import ParsedArtifactBatch, first_value, to_int, to_str
+from app.parsers.common import ParsedArtifactBatch, first_value, normalize_record, to_int, to_str
 
 
 def parse_command_artifacts(rows: list[dict], source_plugin: str) -> ParsedArtifactBatch:
     records = []
     for row in rows:
+        raw_record = row
+        row = normalize_record(row)
         records.append(
             {
                 "pid": to_int(first_value(row, ["pid", "PID"])),
@@ -14,8 +16,7 @@ def parse_command_artifacts(rows: list[dict], source_plugin: str) -> ParsedArtif
                 "shell_type": "cmdline" if source_plugin == "windows.cmdline" else None,
                 "user_name": to_str(first_value(row, ["user_name", "user", "owner"])),
                 "executed_at": None,
-                "raw_record": row,
+                "raw_record": raw_record,
             }
         )
     return ParsedArtifactBatch("command_artifacts", records)
-

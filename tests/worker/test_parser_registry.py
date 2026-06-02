@@ -9,6 +9,8 @@ FIXTURES = Path(__file__).parent / "fixtures" / "volatility"
 
 def test_registry_dispatches_known_parser() -> None:
     assert get_parser("windows.pslist") is not None
+    assert get_parser("windows.vadyarascan") is not None
+    assert get_parser("windows.pslist.PsList") is None
     assert get_parser("unknown.plugin") is None
 
 
@@ -24,4 +26,3 @@ def test_handles_parser_preserves_no_artifacts_for_mvp() -> None:
 
     assert batch.table_name == "module_artifacts"
     assert batch.records == []
-

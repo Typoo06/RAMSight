@@ -6,6 +6,20 @@ import json
 import re
 from typing import Any
 
+PLACEHOLDER_STRINGS = {
+    "",
+    "-",
+    "disabled",
+    "n/a",
+    "na",
+    "none",
+    "not recorded",
+    "null",
+    "unknown",
+}
+WINDOWS_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+WINDOWS_ROOT_PATH_RE = re.compile(r"^[\\/][^\\/]+[\\/]")
+
 
 @dataclass(frozen=True)
 class ParsedArtifactBatch:
@@ -66,13 +80,21 @@ def extract_rows(data: Any) -> list[dict]:
 def first_value(row: dict, aliases: list[str]) -> Any:
     for alias in aliases:
         key = normalize_key(alias)
-        if key in row and row[key] not in (None, "", "N/A"):
+        if key in row and not is_placeholder_value(row[key]):
             return row[key]
     return None
 
 
+def is_placeholder_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in PLACEHOLDER_STRINGS
+    return False
+
+
 def to_int(value: Any) -> int | None:
-    if value in (None, "", "N/A", "-"):
+    if is_placeholder_value(value):
         return None
     if isinstance(value, int):
         return value
@@ -84,9 +106,63 @@ def to_int(value: Any) -> int | None:
 
 
 def to_str(value: Any) -> str | None:
-    if value in (None, "", "N/A"):
+    if is_placeholder_value(value):
         return None
-    return str(value)
+    return str(value).strip()
+
+
+def to_bool(value: Any) -> bool:
+    if is_placeholder_value(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {"true", "yes", "y", "1", "private"}:
+        return True
+    if text in {"false", "no", "n", "0", "shared"}:
+        return False
+    return False
+
+
+def os_family_from_source_plugin(source_plugin: str | None) -> str:
+    if source_plugin and source_plugin.startswith("windows."):
+        return "windows"
+    if source_plugin and source_plugin.startswith("linux."):
+        return "linux"
+    return "unknown"
+
+
+def is_path_like(value: Any, os_family: str | None = None) -> bool:
+    text = to_str(value)
+    if text is None:
+        return False
+    normalized_family = (os_family or "unknown").lower()
+    if normalized_family == "windows":
+        return bool(
+            WINDOWS_DRIVE_PATH_RE.match(text)
+            or text.startswith("\\\\")
+            or text.startswith("//")
+            or WINDOWS_ROOT_PATH_RE.match(text)
+        )
+    if normalized_family == "linux":
+        return text.startswith("/") or text.startswith("./") or text.startswith("../")
+    return (
+        bool(WINDOWS_DRIVE_PATH_RE.match(text))
+        or text.startswith("\\\\")
+        or text.startswith("//")
+        or text.startswith("/")
+        or text.startswith("./")
+        or text.startswith("../")
+    )
+
+
+def to_path(value: Any, os_family: str | None = None) -> str | None:
+    text = to_str(value)
+    if text is None or not is_path_like(text, os_family):
+        return None
+    return text
 
 
 def to_datetime(value: Any) -> datetime | None:
@@ -115,4 +191,3 @@ def truncate_text(value: Any, limit: int = 4000) -> str | None:
     if text is None:
         return None
     return text[:limit]
-

@@ -26,6 +26,7 @@ from app.parsers.persistence import (
 from app.parsers.registry import parse_raw_wrapper
 from app.storage.client import ObjectStorageClient, StorageObject
 from app.storage.keys import normalize_object_name_part
+from app.reports.persistence import run_html_report_generation_for_job
 from app.tasks.status import STATUS_COMPLETED, STATUS_FAILED, STATUS_QUEUED, STATUS_RUNNING
 from app.utils.workspace import isolated_job_workspace
 from app.volatility.registry import select_plugins
@@ -159,7 +160,11 @@ def insert_plugin_result(
             parsed_record_count=0,
             error_message=error_message,
             duration_ms=run_result.duration_ms,
-            extra_data={"return_code": run_result.return_code, "timed_out": run_result.timed_out},
+            extra_data={
+                "return_code": run_result.return_code,
+                "timed_out": run_result.timed_out,
+                **(run_result.extra_data or {}),
+            },
             started_at=started_at,
             completed_at=completed_at,
             created_at=started_at,
@@ -236,6 +241,7 @@ def run_analysis_job(job_id: str) -> dict:
             detection_finding_count = 0
             ioc_count = 0
             ioc_export_keys = {}
+            report_result = {}
 
             for plugin in selected_plugins:
                 plugin_started_at = utc_now()
@@ -322,14 +328,35 @@ def run_analysis_job(job_id: str) -> dict:
                     LOGGER.warning("IOC extraction failed for job %s: %s", parsed_job_id, error_message)
                     ioc_export_keys = {"error": error_message}
 
-        completed_at = utc_now()
-        elapsed_ms = duration_ms_since(task_started)
-        with engine.begin() as conn:
-            if successful_plugins > 0:
-                mark_job_completed(conn, parsed_job_id, completed_at, elapsed_ms)
+                completed_at = utc_now()
+                elapsed_ms = duration_ms_since(task_started)
+                with engine.begin() as conn:
+                    mark_job_completed(conn, parsed_job_id, completed_at, elapsed_ms)
                 job_status = STATUS_COMPLETED
+
+                try:
+                    with engine.begin() as conn:
+                        generated_report = run_html_report_generation_for_job(
+                            conn,
+                            parsed_job_id,
+                            workspace,
+                            storage_client,
+                            get_settings().report_templates_dir,
+                        )
+                    report_result = {
+                        "id": str(generated_report["report_id"]),
+                        "bucket": generated_report["storage_bucket"],
+                        "key": generated_report["storage_key"],
+                    }
+                except Exception as exc:  # noqa: BLE001 - report failure should not fail completed analysis.
+                    error_message = short_error_message(exc)
+                    LOGGER.warning("HTML report generation failed for job %s: %s", parsed_job_id, error_message)
+                    report_result = {"error": error_message}
             else:
-                mark_job_failed(conn, parsed_job_id, "all selected Volatility plugins failed", completed_at, elapsed_ms)
+                completed_at = utc_now()
+                elapsed_ms = duration_ms_since(task_started)
+                with engine.begin() as conn:
+                    mark_job_failed(conn, parsed_job_id, "all selected Volatility plugins failed", completed_at, elapsed_ms)
                 job_status = STATUS_FAILED
 
         return {
@@ -340,6 +367,7 @@ def run_analysis_job(job_id: str) -> dict:
             "detection_findings": detection_finding_count,
             "iocs": ioc_count,
             "ioc_exports": ioc_export_keys,
+            "report": report_result,
         }
     except Exception as exc:  # noqa: BLE001 - task boundary stores a safe failure summary.
         completed_at = utc_now()

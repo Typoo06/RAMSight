@@ -1,4 +1,4 @@
-# Object key builders for MinIO/S3 storage.
+# OS-neutral object key helpers for MinIO/S3 paths.
 
 from pathlib import PurePath
 import re
@@ -20,11 +20,11 @@ def normalize_plugin_name_part(plugin_name: str) -> str:
     return normalize_object_name_part(plugin_name.replace(".", "_"))
 
 
-def evidence_object_key(case_id: object, evidence_id: object, filename: str) -> str:
+def evidence_object_key(case_id: object, evidence_id: object, safe_filename: str) -> str:
     return (
         f"case-{normalize_object_name_part(case_id)}/"
         f"evidence-{normalize_object_name_part(evidence_id)}/"
-        f"{normalize_object_name_part(filename)}"
+        f"{normalize_object_name_part(safe_filename)}"
     )
 
 
@@ -44,9 +44,18 @@ def parsed_plugin_output_key(case_id: object, job_id: object, plugin_name: str) 
     )
 
 
+def ioc_export_key(case_id: object, job_id: object, filename: str) -> str:
+    return (
+        f"case-{normalize_object_name_part(case_id)}/"
+        f"job-{normalize_object_name_part(job_id)}/iocs/"
+        f"{normalize_object_name_part(filename)}"
+    )
+
+
 def report_object_key(case_id: object, job_id: object, report_filename: str) -> str:
     return (
         f"case-{normalize_object_name_part(case_id)}/"
         f"job-{normalize_object_name_part(job_id)}/reports/"
         f"{normalize_object_name_part(report_filename)}"
     )
+

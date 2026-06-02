@@ -1,11 +1,13 @@
 # Network artifact parsers.
 
-from app.parsers.common import ParsedArtifactBatch, endpoint_parts, first_value, to_datetime, to_int, to_str
+from app.parsers.common import ParsedArtifactBatch, endpoint_parts, first_value, normalize_record, to_datetime, to_int, to_str
 
 
 def parse_network_artifacts(rows: list[dict], source_plugin: str) -> ParsedArtifactBatch:
     records = []
     for row in rows:
+        raw_record = row
+        row = normalize_record(row)
         local_address, local_port = endpoint_parts(first_value(row, ["local_addr", "local", "local_address"]))
         remote_address, remote_port = endpoint_parts(first_value(row, ["foreign_addr", "foreign", "remote_address"]))
         records.append(
@@ -19,7 +21,7 @@ def parse_network_artifacts(rows: list[dict], source_plugin: str) -> ParsedArtif
                 "pid": to_int(first_value(row, ["pid", "PID"])),
                 "process_name": to_str(first_value(row, ["owner", "process", "process_name"])),
                 "created_time": to_datetime(first_value(row, ["created", "create_time", "created_time"])),
-                "raw_record": row,
+                "raw_record": raw_record,
             }
         )
     return ParsedArtifactBatch("network_artifacts", records)
