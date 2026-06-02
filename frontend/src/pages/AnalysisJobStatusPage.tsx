@@ -155,7 +155,9 @@ export function AnalysisJobStatusPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reports, setReports] = useState<Report[]>([]);
+  const [reviewStatusFilter, setReviewStatusFilter] = useState("all");
   const [yaraMatches, setYaraMatches] = useState<YaraMatchArtifact[]>([]);
+  const reviewStatusParam = reviewStatusFilter === "all" ? undefined : reviewStatusFilter;
 
   useEffect(() => {
     if (!jobId) return;
@@ -247,7 +249,7 @@ export function AnalysisJobStatusPage() {
     let active = true;
 
     Promise.allSettled([
-      listRiskFindings({ job_id: jobId, limit: 500 }),
+      listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: 500 }),
       listIOCs({ job_id: jobId, limit: 500 }),
       listReports({ job_id: jobId, limit: 100 }),
     ]).then(([findingResult, iocResult, reportResult]) => {
@@ -275,14 +277,19 @@ export function AnalysisJobStatusPage() {
     return () => {
       active = false;
     };
-  }, [jobId, job]);
+  }, [jobId, job, reviewStatusParam]);
 
   useEffect(() => {
     if (!jobId) return;
     let active = true;
 
-    listRiskFindings({ job_id: jobId, limit: 500 })
+    Promise.resolve().then(() => {
+      if (!active) return null;
+      setFindingLoading(true);
+      return listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: 500 });
+    })
       .then((response) => {
+        if (!response) return;
         if (active) setFindings(response.items);
       })
       .catch((err: unknown) => {
@@ -317,7 +324,7 @@ export function AnalysisJobStatusPage() {
     return () => {
       active = false;
     };
-  }, [jobId]);
+  }, [jobId, reviewStatusParam]);
 
   useEffect(() => {
     if (!job?.id || !isActiveJobStatus(job.status)) return;
@@ -339,9 +346,18 @@ export function AnalysisJobStatusPage() {
 
   const sortedFindings = useMemo(() => sortFindingsByRisk(findings), [findings]);
   const highPriorityFindings = useMemo(
-    () => sortedFindings.filter((finding) => severityRank(finding.severity) >= severityRank("high")),
+    () => sortedFindings.filter((finding) => severityRank(finding.effective_severity ?? finding.severity) >= severityRank("high")),
     [sortedFindings],
   );
+  function handleFindingUpdated(updatedFinding: RiskFinding) {
+    setFindings((current) => {
+      const updatedStatus = updatedFinding.review_status || "new";
+      if (reviewStatusParam && updatedStatus !== reviewStatusParam) {
+        return current.filter((finding) => finding.id !== updatedFinding.id);
+      }
+      return current.map((finding) => (finding.id === updatedFinding.id ? updatedFinding : finding));
+    });
+  }
   const processRiskSummaries = useMemo(() => sortedFindings.filter(isProcessRiskSummary), [sortedFindings]);
   const networkFindings = useMemo(() => sortedFindings.filter(isNetworkFinding), [sortedFindings]);
   const moduleFindings = useMemo(() => sortedFindings.filter(isModuleOrPathFinding), [sortedFindings]);
@@ -420,6 +436,21 @@ export function AnalysisJobStatusPage() {
         <Card title="Indicators"><p className="metric-value">{iocs.length}</p><p className="muted">Extracted IOC records</p></Card>
       </div>
 
+      <Card title="Finding review filter">
+        <div className="filter-row">
+          <label>
+            <span>Review status</span>
+            <select value={reviewStatusFilter} onChange={(event) => setReviewStatusFilter(event.target.value)}>
+              <option value="all">All findings</option>
+              <option value="new">New</option>
+              <option value="investigating">Investigating</option>
+              <option value="reviewed">Reviewed</option>
+            </select>
+          </label>
+        </div>
+        <p className="muted">Review status is analyst metadata and does not change RAMSight detection records or regenerate the technical report.</p>
+      </Card>
+
       <ResultSection
         title="Top suspicious findings"
         loading={findingLoading}
@@ -427,7 +458,7 @@ export function AnalysisJobStatusPage() {
         empty={sortedFindings.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no risk findings recorded.")}
       >
-        <FindingTable caption="Critical and high findings are shown first" findings={sortedFindings} limit={20} />
+        <FindingTable caption="Critical and high findings are shown first" findings={sortedFindings} limit={20} onFindingUpdated={handleFindingUpdated} />
       </ResultSection>
 
       <ResultSection
@@ -437,7 +468,7 @@ export function AnalysisJobStatusPage() {
         empty={processRiskSummaries.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "No process risk summary findings are available for this job.")}
       >
-        <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={20} />
+        <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={20} onFindingUpdated={handleFindingUpdated} />
       </ResultSection>
 
       <ResultSection
@@ -448,7 +479,7 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No network findings or network IOC records are available for this job.")}
       >
         <div className="page-stack compact-stack">
-          {networkFindings.length > 0 && <FindingTable caption="Network-related findings" findings={networkFindings} limit={20} />}
+          {networkFindings.length > 0 && <FindingTable caption="Network-related findings" findings={networkFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
           {networkIocs.length > 0 && <IocTable caption="Network IOC records" iocs={networkIocs} limit={50} />}
         </div>
       </ResultSection>
@@ -461,7 +492,7 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No suspicious module or path indicators are available through the current APIs.")}
       >
         <div className="page-stack compact-stack">
-          {moduleFindings.length > 0 && <FindingTable caption="Module/path findings" findings={moduleFindings} limit={20} />}
+          {moduleFindings.length > 0 && <FindingTable caption="Module/path findings" findings={moduleFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
           {moduleIocs.length > 0 && <IocTable caption="Module/path IOC records" iocs={moduleIocs} limit={50} />}
         </div>
       </ResultSection>
@@ -474,7 +505,7 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No memory region findings are available for this job.")}
       >
         <div className="page-stack compact-stack">
-          {memoryFindings.length > 0 && <FindingTable caption="Memory region findings" findings={memoryFindings} limit={20} />}
+          {memoryFindings.length > 0 && <FindingTable caption="Memory region findings" findings={memoryFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
           {memoryIocs.length > 0 && <IocTable caption="Memory region IOC records" iocs={memoryIocs} limit={50} />}
         </div>
       </ResultSection>
@@ -488,7 +519,7 @@ export function AnalysisJobStatusPage() {
       >
         <div className="page-stack compact-stack">
           <p className="section-note">{yaraMessage}</p>
-          {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={20} />}
+          {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
           {yaraIocs.length > 0 && <IocTable caption="YARA IOC records" iocs={yaraIocs} limit={50} />}
         </div>
       </ResultSection>

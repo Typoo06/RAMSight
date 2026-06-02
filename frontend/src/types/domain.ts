@@ -1,5 +1,8 @@
 export type OSFamily = "windows" | "linux" | "unknown" | string;
 export type AnalysisPluginProfile = "windows_default" | "windows_memory_yara";
+export type ReviewStatus = "new" | "investigating" | "reviewed";
+export type AnalystVerdict = "true_positive" | "false_positive" | "benign" | "suspicious" | "needs_more_evidence" | "ignored";
+export type Severity = "low" | "medium" | "high" | "critical" | string;
 
 export interface Case {
   id: string;
@@ -94,7 +97,14 @@ export interface RiskFinding {
   rule_id: string | null;
   rule_name: string | null;
   category: string | null;
-  severity: string;
+  severity: Severity;
+  effective_severity?: Severity;
+  review_status?: ReviewStatus | string | null;
+  analyst_verdict?: AnalystVerdict | string | null;
+  severity_override?: Severity | null;
+  reviewed_at?: string | null;
+  reviewed_by_name?: string | null;
+  review_updated_at?: string | null;
   score: number;
   title: string;
   description: string | null;
@@ -102,6 +112,19 @@ export interface RiskFinding {
   artifact_id: string | null;
   recommendation: string | null;
   extra_data: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnalystNote {
+  id: string;
+  case_id: string;
+  evidence_id: string | null;
+  analysis_job_id: string | null;
+  risk_finding_id: string | null;
+  note_type: string;
+  author_name: string | null;
+  content: string;
   created_at: string;
   updated_at: string;
 }

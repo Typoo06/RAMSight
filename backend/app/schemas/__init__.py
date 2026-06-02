@@ -1,6 +1,7 @@
 # Pydantic schema package.
 
 from app.schemas.analysis_job import AnalysisJobCreate, AnalysisJobListResponse, AnalysisJobRead, AnalysisJobStatusRead
+from app.schemas.analyst_note import AnalystNoteCreate, AnalystNoteListResponse, AnalystNoteRead
 from app.schemas.artifact import (
     CommandArtifactListResponse,
     CommandArtifactRead,
@@ -20,13 +21,16 @@ from app.schemas.evidence import EvidenceListResponse, EvidenceRead, EvidenceReg
 from app.schemas.ioc import IOCListResponse, IOCRead
 from app.schemas.plugin_result import PluginResultListResponse, PluginResultRead
 from app.schemas.report import ReportListResponse, ReportRead
-from app.schemas.risk_finding import RiskFindingListResponse, RiskFindingRead
+from app.schemas.risk_finding import RiskFindingListResponse, RiskFindingRead, RiskFindingReviewUpdate
 
 __all__ = [
     "AnalysisJobCreate",
     "AnalysisJobListResponse",
     "AnalysisJobRead",
     "AnalysisJobStatusRead",
+    "AnalystNoteCreate",
+    "AnalystNoteListResponse",
+    "AnalystNoteRead",
     "CommandArtifactListResponse",
     "CommandArtifactRead",
     "CaseCreate",
@@ -51,6 +55,7 @@ __all__ = [
     "ReportRead",
     "RiskFindingListResponse",
     "RiskFindingRead",
+    "RiskFindingReviewUpdate",
     "YaraMatchListResponse",
     "YaraMatchRead",
 ]
