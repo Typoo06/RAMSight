@@ -17,6 +17,10 @@ function apiUrl(path: string): string {
   return `${API_BASE_URL}${normalizedPath}`;
 }
 
+export function apiDownloadUrl(path: string): string {
+  return apiUrl(path);
+}
+
 async function parseResponse(response: Response): Promise<unknown> {
   if (response.status === 204) {
     return null;

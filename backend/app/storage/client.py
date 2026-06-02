@@ -1,9 +1,11 @@
 # MinIO/S3 client wrapper for evidence and generated analysis artifacts.
 
 from dataclasses import dataclass
+from collections.abc import Iterator
 from pathlib import Path
 
 from minio import Minio
+from minio.error import S3Error
 
 from app.core.config import Settings, get_settings
 from app.storage.hashing import FileHashResult, calculate_file_hashes
@@ -24,6 +26,38 @@ class StorageObject:
     key: str
     size_bytes: int
     etag: str | None = None
+
+
+class StorageDownloadError(Exception):
+    pass
+
+
+class StorageObjectNotFoundError(StorageDownloadError):
+    pass
+
+
+@dataclass(frozen=True)
+class StorageObjectStream:
+
+    bucket: str
+    key: str
+    response: object
+    size_bytes: int | None = None
+    content_type: str | None = None
+
+    def iter_chunks(self, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        try:
+            yield from self.response.stream(chunk_size)  # type: ignore[attr-defined]
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        close = getattr(self.response, "close", None)
+        release_conn = getattr(self.response, "release_conn", None)
+        if callable(close):
+            close()
+        if callable(release_conn):
+            release_conn()
 
 
 @dataclass(frozen=True)
@@ -79,6 +113,31 @@ class ObjectStorageClient:
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         self.client.fget_object(bucket, object_key, str(destination_path))
         return StorageObject(bucket=bucket, key=object_key, size_bytes=destination_path.stat().st_size)
+
+    def open_object_stream(self, bucket: str, object_key: str) -> StorageObjectStream:
+        try:
+            response = self.client.get_object(bucket, object_key)
+        except S3Error as exc:
+            if exc.code in {"NoSuchBucket", "NoSuchKey", "NoSuchObject", "NoSuchVersion"}:
+                raise StorageObjectNotFoundError("storage object not found") from exc
+            raise StorageDownloadError("storage object could not be downloaded") from exc
+        except Exception as exc:
+            raise StorageDownloadError("storage object could not be downloaded") from exc
+
+        headers = getattr(response, "headers", {}) or {}
+        content_length = headers.get("Content-Length") or headers.get("content-length")
+        try:
+            size_bytes = int(content_length) if content_length is not None else None
+        except (TypeError, ValueError):
+            size_bytes = None
+        content_type = headers.get("Content-Type") or headers.get("content-type")
+        return StorageObjectStream(
+            bucket=bucket,
+            key=object_key,
+            response=response,
+            size_bytes=size_bytes,
+            content_type=content_type,
+        )
 
     def upload_evidence(
         self,
@@ -195,4 +254,3 @@ class ObjectStorageClient:
 
 def get_storage_client() -> ObjectStorageClient:
     return ObjectStorageClient()
-

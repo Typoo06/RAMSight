@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAnalysisJob, getAnalysisJobStatus } from "../api/analysisJobs";
-import { listIOCs } from "../api/iocs";
+import { iocExportDownloadUrl, listIOCs } from "../api/iocs";
 import { listReports } from "../api/reports";
 import { listRiskFindings } from "../api/riskFindings";
 import { FindingTable } from "../components/results/FindingTable";
@@ -203,6 +203,12 @@ export function AnalysisJobStatusPage() {
   const memoryIocs = useMemo(() => iocs.filter(isMemoryRegionIOC), [iocs]);
   const yaraIocs = useMemo(() => iocs.filter(isYaraIOC), [iocs]);
   const yaraMessage = job ? yaraStatusMessage(job, yaraFindings.length > 0 || yaraIocs.length > 0) : "No YARA profile was recorded for this job.";
+  const iocExportActions = job ? (
+    <div className="button-row">
+      <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "json")}>Download IOC JSON</a>
+      <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "csv")}>Download IOC CSV</a>
+    </div>
+  ) : null;
 
   if (!caseId || !jobId) return <ErrorState message="RAMSight could not identify the requested analysis job." />;
   if (loading) return <LoadingState label="Loading RAMSight analysis job..." />;
@@ -335,12 +341,16 @@ export function AnalysisJobStatusPage() {
 
       <ResultSection
         title="IOC table"
+        actions={iocExportActions}
         loading={iocLoading}
         error={iocError}
         empty={iocs.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no IOC records extracted.")}
       >
-        <IocTable caption="All IOC records for this analysis job" iocs={iocs} limit={100} />
+        <div className="page-stack compact-stack">
+          <IocTable caption="All IOC records for this analysis job" iocs={iocs} limit={100} />
+          <p className="muted">IOC export downloads are served by RAMSight through the backend. If an export is not available yet, the download endpoint will return a clear error.</p>
+        </div>
       </ResultSection>
 
       <ResultSection

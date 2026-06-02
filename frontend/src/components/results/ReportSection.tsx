@@ -1,5 +1,6 @@
 import { Badge } from "../ui/Badge";
 import { Table } from "../ui/Table";
+import { reportDownloadUrl } from "../../api/reports";
 import type { Report } from "../../types/domain";
 import { displayValue, formatDateTime } from "../../utils/format";
 import { statusTone } from "../../utils/status";
@@ -20,6 +21,7 @@ export function ReportSection({ reports }: ReportSectionProps) {
             <th>Generated</th>
             <th>Bucket</th>
             <th>Object key</th>
+            <th>Download</th>
           </tr>
         </thead>
         <tbody>
@@ -31,11 +33,16 @@ export function ReportSection({ reports }: ReportSectionProps) {
               <td>{formatDateTime(report.generated_at)}</td>
               <td>{displayValue(report.storage_bucket)}</td>
               <td><code>{displayValue(report.storage_key)}</code></td>
+              <td>
+                <a className="button button-secondary button-small" href={reportDownloadUrl(report.id)}>
+                  Download HTML report
+                </a>
+              </td>
             </tr>
           ))}
         </tbody>
       </Table>
-      <p className="muted">RAMSight generated report metadata is available here. Direct HTML open/download is not wired yet because the current backend exposes storage bucket/key metadata, not a download or presigned URL endpoint.</p>
+      <p className="muted">RAMSight downloads generated HTML reports through the backend so MinIO credentials stay private. Metadata remains visible for analyst traceability.</p>
     </div>
   );
 }

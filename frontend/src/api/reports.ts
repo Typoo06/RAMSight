@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiDownloadUrl, apiRequest } from "./client";
 import type { ListResponse, Report } from "../types/domain";
 
 export interface ReportListParams {
@@ -21,3 +21,6 @@ export function getReport(reportId: string): Promise<Report> {
   return apiRequest<Report>(`/api/v1/reports/${reportId}`);
 }
 
+export function reportDownloadUrl(reportId: string): string {
+  return apiDownloadUrl(`/api/v1/reports/${reportId}/download`);
+}
