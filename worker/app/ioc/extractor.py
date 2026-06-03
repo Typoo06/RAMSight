@@ -8,6 +8,7 @@ from collections import defaultdict
 from uuid import UUID
 
 from app.detection.engine import command_has_encoded_powershell
+from app.detection.path_reputation import known_microsoft_appdata_path
 from app.ioc.dedup import deduplicate_iocs, normalize_ioc_value, normalize_path
 from app.ioc.types import (
     IOC_COMMAND_LINE,
@@ -273,31 +274,48 @@ def is_suspicious_path(path: str | None, os_family: str | None) -> tuple[bool, s
 
 def extract_module_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
     iocs = []
+    os_family = context.get("os_family")
     for row in rows:
+        module_path = row.get("module_path")
+        if not is_path_like(module_path, os_family):
+            continue
+        reputation = known_microsoft_appdata_path(module_path, os_family)
         findings = linked_findings(risk_index, MODULE_TABLE, row)
-        suspicious, reason = is_suspicious_path(row.get("module_path"), context.get("os_family"))
+        if reputation and not findings:
+            continue
+        suspicious, reason = is_suspicious_path(module_path, os_family)
         if not suspicious and not findings:
             continue
-        if not is_path_like(row.get("module_path"), context.get("os_family")):
-            continue
         severity = severity_from_findings(findings, "medium")
+        matched_reason = reason or "linked risk finding"
+        extra_data = {
+            "severity": severity,
+            "matched_reason": matched_reason,
+            "module_name": row.get("module_name"),
+            "pid": row.get("pid"),
+            "process_name": row.get("process_name"),
+            "source_plugin": row.get("source_plugin"),
+        }
+        if reputation:
+            matched_reason = "linked finding with known Microsoft AppData module context"
+            extra_data.update(
+                {
+                    "matched_reason": matched_reason,
+                    "known_microsoft_appdata_module": True,
+                    "module_app_name": reputation.app_name,
+                    "module_app_root": reputation.normalized_root,
+                }
+            )
         append_if_present(
             iocs,
             make_ioc(
                 context,
                 IOC_MODULE_PATH,
-                row.get("module_path"),
+                module_path,
                 row.get("source_plugin"),
                 confidence_for_severity(severity, 70),
-                reason or "linked risk finding",
-                {
-                    "severity": severity,
-                    "matched_reason": reason or "linked risk finding",
-                    "module_name": row.get("module_name"),
-                    "pid": row.get("pid"),
-                    "process_name": row.get("process_name"),
-                    "source_plugin": row.get("source_plugin"),
-                },
+                matched_reason,
+                extra_data,
                 first_finding_id(findings),
             ),
         )

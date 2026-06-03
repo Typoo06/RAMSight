@@ -615,3 +615,122 @@ def test_critical_process_summary_requires_independent_evidence_categories() -> 
     assert summaries[0].severity == "high"
     assert summaries[0].extra_data["total_score"] == 8
     assert summaries[0].extra_data["unique_component_count"] == 2
+
+
+def microsoft_appdata_module(path: str, pid: int = 6620, process_name: str = "OneDrive.exe", name: str = "module.dll") -> dict:
+    return {
+        "id": uuid4(),
+        "pid": pid,
+        "process_name": process_name,
+        "module_name": name,
+        "module_path": path,
+        "source_plugin": "windows.dlllist",
+    }
+
+
+def test_known_microsoft_appdata_module_paths_skip_standalone_module_findings() -> None:
+    artifacts = {
+        MODULE_TABLE: [
+            microsoft_appdata_module("C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\FileSyncShell64.dll"),
+            microsoft_appdata_module("C:/Users/analyst/AppData/Local/Microsoft/Edge/Application/msedge.dll", process_name="msedge.exe"),
+            microsoft_appdata_module(
+                "C:\\Users\\analyst\\AppData\\Local\\Microsoft\\EdgeWebView\\Application\\WebView2Loader.dll",
+                process_name="msedgewebview2.exe",
+            ),
+        ]
+    }
+
+    findings = evaluate_rules([rule_by_id("WIN_SUSPICIOUS_MODULE_PATH")], artifacts, context())
+
+    assert findings == []
+
+
+def test_unknown_appdata_module_path_remains_suspicious() -> None:
+    artifacts = {
+        MODULE_TABLE: [
+            microsoft_appdata_module(
+                "C:\\Users\\analyst\\AppData\\Local\\OddVendor\\payload.dll",
+                process_name="odd.exe",
+                name="payload.dll",
+            )
+        ]
+    }
+
+    findings = evaluate_rules([rule_by_id("WIN_SUSPICIOUS_MODULE_PATH")], artifacts, context())
+
+    assert len(findings) == 1
+    assert findings[0].severity == "medium"
+    assert findings[0].extra_data["module_path"].endswith("OddVendor\\payload.dll")
+
+
+def test_onedrive_module_with_malfind_is_context_not_high_confidence_module_signal() -> None:
+    region = {**memory_region(pid=6620), "process_name": "OneDrive.exe"}
+    artifacts = {
+        MEMORY_REGION_TABLE: [region],
+        MODULE_TABLE: [
+            microsoft_appdata_module("C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\FileSyncShell64.dll"),
+            microsoft_appdata_module("C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\Telemetry.dll", name="Telemetry.dll"),
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("MEMORY_REGION_WITH_SUSPICIOUS_MODULE")], artifacts, context())
+
+    assert len(findings) == 1
+    assert findings[0].severity == "medium"
+    assert findings[0].score == 5
+    assert "Microsoft AppData module context" in findings[0].title
+    linked = findings[0].extra_data["linked_artifacts"]
+    assert linked["known_microsoft_appdata_module"] is True
+    assert linked["module_app_name"] == "onedrive"
+    assert linked["module_context_only"] is True
+
+
+def test_repeated_onedrive_modules_do_not_make_process_summary_critical_by_themselves() -> None:
+    region = {**memory_region(pid=6620), "process_name": "OneDrive.exe"}
+    artifacts = {
+        MEMORY_REGION_TABLE: [region],
+        MODULE_TABLE: [
+            microsoft_appdata_module(
+                f"C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\component{index}.dll",
+                name=f"component{index}.dll",
+            )
+            for index in range(10)
+        ],
+    }
+    rules = [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("MEMORY_REGION_WITH_SUSPICIOUS_MODULE")]
+
+    findings = evaluate_rules(rules, artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    module_context_findings = [finding for finding in findings if finding.rule_id == "MEMORY_REGION_WITH_SUSPICIOUS_MODULE"]
+    assert len(module_context_findings) == 1
+    assert len(summaries) == 1
+    assert summaries[0].severity == "high"
+    assert summaries[0].extra_data["total_score"] == 13
+    assert summaries[0].extra_data["unique_component_count"] == 2
+    assert summaries[0].extra_data["evidence_groups"] == ["memory_region", "module_context"]
+
+
+def test_unknown_user_writable_module_path_still_contributes_strong_context() -> None:
+    artifacts = {
+        MEMORY_REGION_TABLE: [memory_region()],
+        MODULE_TABLE: [
+            microsoft_appdata_module(
+                "C:\\Users\\analyst\\AppData\\Local\\OddVendor\\payload.dll",
+                pid=2924,
+                process_name="WinRAR.exe",
+                name="payload.dll",
+            )
+        ],
+    }
+    rules = [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("MEMORY_REGION_WITH_SUSPICIOUS_MODULE")]
+
+    findings = evaluate_rules(rules, artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()))
+
+    module_findings = [finding for finding in findings if finding.rule_id == "MEMORY_REGION_WITH_SUSPICIOUS_MODULE"]
+    assert len(module_findings) == 1
+    assert module_findings[0].severity == "high"
+    assert len(summaries) == 1
+    assert summaries[0].severity == "critical"
+    assert "suspicious_module" in summaries[0].extra_data["evidence_groups"]

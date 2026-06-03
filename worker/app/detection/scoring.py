@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 
+from app.detection.path_reputation import known_microsoft_appdata_path
 from app.detection.rules import FindingDraft
 from app.parsers.common import is_placeholder_value
 
@@ -57,9 +58,34 @@ def process_key_from_finding(finding: FindingDraft) -> tuple | None:
     return None
 
 
-def component_key(finding: FindingDraft) -> tuple:
+def linked_artifacts_for_finding(finding: FindingDraft) -> dict:
     extra_data = finding.extra_data or {}
     linked_artifacts = extra_data.get("linked_artifacts") or {}
+    return linked_artifacts if isinstance(linked_artifacts, dict) else {}
+
+
+def microsoft_module_reputation(finding: FindingDraft):
+    extra_data = finding.extra_data or {}
+    linked_artifacts = linked_artifacts_for_finding(finding)
+    if extra_data.get("known_microsoft_appdata_module") or linked_artifacts.get("known_microsoft_appdata_module"):
+        path = linked_artifacts.get("module_path") or extra_data.get("module_path")
+        return known_microsoft_appdata_path(path, finding.os_family)
+    path = linked_artifacts.get("module_path") or extra_data.get("module_path")
+    return known_microsoft_appdata_path(path, finding.os_family)
+
+
+def module_component_path_key(finding: FindingDraft) -> str | None:
+    extra_data = finding.extra_data or {}
+    linked_artifacts = linked_artifacts_for_finding(finding)
+    reputation = microsoft_module_reputation(finding)
+    if reputation:
+        return f"known-microsoft-appdata:{reputation.app_name}:{reputation.normalized_root}"
+    return normalize_path(linked_artifacts.get("module_path") or extra_data.get("module_path"))
+
+
+def component_key(finding: FindingDraft) -> tuple:
+    extra_data = finding.extra_data or {}
+    linked_artifacts = linked_artifacts_for_finding(finding)
     if finding.rule_id in YARA_RULE_IDS or finding.artifact_type == "yara_matches":
         return (
             "yara_match",
@@ -69,19 +95,20 @@ def component_key(finding: FindingDraft) -> tuple:
             normalize_text(extra_data.get("rule_name")),
             finding.source_plugin,
         )
+    module_path_key = module_component_path_key(finding)
     return (
         finding.rule_id,
         finding.category,
         extra_data.get("pid"),
         normalize_text(extra_data.get("process_name")),
         normalize_path(extra_data.get("image_path")),
-        normalize_path(extra_data.get("module_path")),
+        module_path_key,
         extra_data.get("start_address"),
         extra_data.get("end_address"),
         linked_artifacts.get("remote_address") or extra_data.get("remote_address"),
         linked_artifacts.get("remote_port") or extra_data.get("remote_port"),
         normalize_text(linked_artifacts.get("command_excerpt") or extra_data.get("command_excerpt")),
-        normalize_path(linked_artifacts.get("module_path") or extra_data.get("module_path")),
+        module_path_key,
         extra_data.get("rule_name"),
         extra_data.get("offset"),
     )
@@ -93,6 +120,8 @@ def evidence_groups_for_finding(finding: FindingDraft) -> set[str]:
     if finding.rule_id in COMMAND_CORRELATION_RULE_IDS:
         return {"suspicious_command"}
     if finding.rule_id in MODULE_CORRELATION_RULE_IDS:
+        if microsoft_module_reputation(finding):
+            return {"module_context"}
         return {"suspicious_module"}
     if finding.rule_id in YARA_RULE_IDS or finding.artifact_type == "yara_matches":
         return {"yara_match"}
@@ -217,6 +246,8 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         total_score, evidence_groups = score_by_independent_evidence_groups(selected)
         severity = severity_for_score(total_score, scoring_config)
         if severity == "critical" and len(evidence_groups) < 2:
+            severity = "high"
+        if severity == "critical" and evidence_groups <= {"memory_region", "module_context"}:
             severity = "high"
         if severity == "critical" and "yara_match" in evidence_groups:
             has_memory = "memory_region" in evidence_groups

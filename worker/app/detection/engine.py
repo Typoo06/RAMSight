@@ -7,6 +7,7 @@ import logging
 import re
 from collections.abc import Iterable
 
+from app.detection.path_reputation import known_microsoft_appdata_path
 from app.detection.rules import DetectionRule, FindingDraft, applies_to_os
 from app.parsers.common import is_path_like
 
@@ -663,6 +664,8 @@ def evaluate_suspicious_module_path(rule: DetectionRule, artifacts: dict[str, li
         module_path = artifact.get("module_path")
         if not is_path_like(module_path, os_family):
             continue
+        if known_microsoft_appdata_path(module_path, os_family):
+            continue
         normalized_path = normalize_path(module_path, os_family)
         matched = [fragment for fragment in fragments if fragment in normalized_path]
         if not matched:
@@ -894,32 +897,55 @@ def evaluate_memory_module_correlation(rule: DetectionRule, artifacts: dict[str,
             matched = [fragment for fragment in fragments if fragment in normalized_path]
             if not matched:
                 continue
-            dedupe_key = process_memory_key(context, rule, region, normalized_path)
+            reputation = known_microsoft_appdata_path(module_path, os_family)
+            module_key = reputation.normalized_root if reputation else normalized_path
+            dedupe_key = process_memory_key(context, rule, region, module_key)
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
-            findings.append(
-                make_finding(
-                    rule,
-                    context,
-                    region,
-                    f"Executable memory region with suspicious module path: {process_identity(region)}",
-                    f"{process_identity(region)} has suspicious executable memory and a module mapped from a user-writable path; this requires analyst validation.",
-                    MEMORY_REGION_TABLE,
-                    memory_extra(
-                        region,
-                        "executable memory region correlated with suspicious/user-writable module path by PID",
-                        {
-                            "memory_region_artifact_id": str(region.get("id")),
-                            "module_artifact_id": str(module.get("id")),
-                            "module_name": module.get("module_name"),
-                            "module_path": module_path,
-                            "matched_path_fragments": matched,
-                            "module_source_plugin": module.get("source_plugin"),
-                        },
-                    ),
-                )
+            linked_artifacts = {
+                "memory_region_artifact_id": str(region.get("id")),
+                "module_artifact_id": str(module.get("id")),
+                "module_name": module.get("module_name"),
+                "module_path": module_path,
+                "matched_path_fragments": matched,
+                "module_source_plugin": module.get("source_plugin"),
+            }
+            title = f"Executable memory region with suspicious module path: {process_identity(region)}"
+            description = (
+                f"{process_identity(region)} has suspicious executable memory and a module mapped from a user-writable path; "
+                "this requires analyst validation."
             )
+            reason = "executable memory region correlated with suspicious/user-writable module path by PID"
+            severity = rule.severity
+            score = rule.score
+            if reputation:
+                linked_artifacts.update(
+                    {
+                        "known_microsoft_appdata_module": True,
+                        "module_app_name": reputation.app_name,
+                        "module_app_root": reputation.normalized_root,
+                        "module_context_only": True,
+                    }
+                )
+                title = f"Executable memory region with Microsoft AppData module context: {process_identity(region)}"
+                description = (
+                    f"{process_identity(region)} has suspicious executable memory and a module loaded from a known Microsoft "
+                    "AppData application path; treat the module path as supporting context that requires validation."
+                )
+                reason = "executable memory region correlated with known Microsoft AppData module context by PID"
+                severity = "medium"
+                score = min(rule.score, 5)
+            finding = make_finding(
+                rule,
+                context,
+                region,
+                title,
+                description,
+                MEMORY_REGION_TABLE,
+                memory_extra(region, reason, linked_artifacts),
+            )
+            findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
     return findings
 
 

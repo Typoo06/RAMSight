@@ -275,3 +275,44 @@ def test_pid_iocs_deduplicate_across_pslist_and_psscan_sources() -> None:
     iocs = extract_iocs(artifacts, findings, context())
 
     assert len(iocs_by_type(iocs, IOC_PID)) == 1
+
+
+def test_known_microsoft_appdata_modules_do_not_emit_default_module_path_iocs() -> None:
+    artifacts = {
+        MODULE_TABLE: [
+            {
+                "id": uuid4(),
+                "module_name": f"component{index}.dll",
+                "module_path": f"C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\component{index}.dll",
+                "pid": 6620,
+                "process_name": "OneDrive.exe",
+                "source_plugin": "windows.dlllist",
+            }
+            for index in range(8)
+        ]
+    }
+
+    iocs = extract_iocs(artifacts, [], context())
+
+    assert iocs_by_type(iocs, IOC_MODULE_PATH) == []
+
+
+def test_unknown_appdata_module_path_still_extracts_module_ioc() -> None:
+    artifacts = {
+        MODULE_TABLE: [
+            {
+                "id": uuid4(),
+                "module_name": "payload.dll",
+                "module_path": "C:\\Users\\analyst\\AppData\\Local\\OddVendor\\payload.dll",
+                "pid": 2924,
+                "process_name": "WinRAR.exe",
+                "source_plugin": "windows.dlllist",
+            }
+        ]
+    }
+
+    iocs = extract_iocs(artifacts, [], context())
+
+    module_iocs = iocs_by_type(iocs, IOC_MODULE_PATH)
+    assert len(module_iocs) == 1
+    assert module_iocs[0].normalized_value == "c:/users/analyst/appdata/local/oddvendor/payload.dll"
