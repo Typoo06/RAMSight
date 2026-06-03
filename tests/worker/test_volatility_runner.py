@@ -6,18 +6,28 @@ from types import SimpleNamespace
 
 from app.tasks.status import STATUS_COMPLETED, STATUS_FAILED, STATUS_SKIPPED
 from app.volatility.registry import get_plugin_definition
-from app.volatility.runner import run_volatility_plugin
+from app.volatility.runner import plugin_timeout_seconds, run_volatility_plugin
 
 
 class DummySettings:
     volatility_path = "vol"
     volatility_symbol_path = "/symbols"
     volatility_plugin_timeout_seconds = 5
+    volatility_yara_timeout_seconds = 15
     volatility_yara_rules_path = None
+
+
+def test_timeout_selection_uses_default_for_normal_plugins() -> None:
+    assert plugin_timeout_seconds(get_plugin_definition("windows.pslist"), DummySettings()) == 5
+
+
+def test_timeout_selection_uses_yara_timeout_for_vadyarascan() -> None:
+    assert plugin_timeout_seconds(get_plugin_definition("windows.vadyarascan"), DummySettings()) == 15
 
 
 def test_runner_writes_raw_wrapper_for_success(tmp_path) -> None:
     def fake_run(command, capture_output, text, timeout, check):
+        assert timeout == 5
         return SimpleNamespace(returncode=0, stdout='{"rows": []}', stderr="")
 
     result = run_volatility_plugin(
@@ -82,6 +92,7 @@ def test_runner_uses_discovered_yara_rules_for_vadyarascan(tmp_path) -> None:
         rules_dir = str(tmp_path / "rules")
 
     def fake_run(command, capture_output, text, timeout, check):
+        assert timeout == 15
         assert command[-3:] == ["windows.vadyarascan.VadYaraScan", "--yara-file", str(rule_path)]
         return SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
@@ -110,6 +121,45 @@ def test_runner_marks_timeout_failed(tmp_path) -> None:
         process_runner=fake_run,
     )
 
+    payload = json.loads(result.raw_output_path.read_text(encoding="utf-8"))
+
     assert result.status == STATUS_FAILED
     assert result.timed_out is True
-    assert "timed out" in result.error_message
+    assert result.error_message == "Volatility plugin timed out after 5s"
+    assert result.extra_data["timeout_seconds"] == 5
+    assert result.extra_data["timeout_reason"] == "plugin_timeout"
+    assert result.extra_data["plugin_name"] == "windows.psscan"
+    assert result.extra_data["is_yara_plugin"] is False
+    assert payload["extra_data"]["timeout_reason"] == "plugin_timeout"
+
+
+def test_runner_marks_vadyarascan_timeout_with_yara_timeout_metadata(tmp_path) -> None:
+    yara_dir = tmp_path / "rules" / "yara"
+    yara_dir.mkdir(parents=True)
+    (yara_dir / "demo.yar").write_text("rule Demo { condition: false }", encoding="utf-8")
+
+    class YaraSettings(DummySettings):
+        rules_dir = str(tmp_path / "rules")
+
+    def fake_run(command, capture_output, text, timeout, check):
+        raise subprocess.TimeoutExpired(command, timeout, output="partial", stderr="slow")
+
+    result = run_volatility_plugin(
+        get_plugin_definition("windows.vadyarascan"),
+        tmp_path / "evidence.raw",
+        tmp_path / "raw",
+        settings=YaraSettings(),
+        process_runner=fake_run,
+    )
+
+    payload = json.loads(result.raw_output_path.read_text(encoding="utf-8"))
+
+    assert result.status == STATUS_FAILED
+    assert result.timed_out is True
+    assert result.error_message == "Volatility plugin timed out after 15s"
+    assert result.extra_data["timeout_seconds"] == 15
+    assert result.extra_data["timeout_reason"] == "plugin_timeout"
+    assert result.extra_data["plugin_name"] == "windows.vadyarascan"
+    assert result.extra_data["is_yara_plugin"] is True
+    assert payload["extra_data"]["timeout_seconds"] == 15
+    assert payload["extra_data"]["timeout_reason"] == "plugin_timeout"

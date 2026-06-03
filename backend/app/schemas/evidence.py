@@ -28,6 +28,36 @@ class EvidenceRegister(BaseModel):
     acquisition_time: datetime | None = None
 
 
+class EvidenceChunkedUploadInitiate(BaseModel):
+    case_id: UUID
+    original_filename: str = Field(min_length=1, max_length=255)
+    size_bytes: int = Field(gt=0)
+    os_family: OSFamily = OSFamily.UNKNOWN
+    os_version: str | None = None
+    architecture: str | None = None
+    kernel_version: str | None = None
+    symbol_table: str | None = None
+    acquisition_tool: str | None = None
+    acquisition_time: datetime | None = None
+    chunk_size: int | None = Field(default=None, gt=0)
+
+
+class EvidenceChunkedUploadInitiateResponse(BaseModel):
+    upload_id: UUID
+    chunk_size: int
+    max_size_bytes: int
+    total_chunks: int
+    expires_at: datetime | None = None
+
+
+class EvidenceChunkUploadResponse(BaseModel):
+    upload_id: UUID
+    chunk_index: int
+    received_chunks: int
+    total_chunks: int
+    uploaded_bytes: int
+
+
 class EvidenceRead(OrmModel):
     id: UUID
     case_id: UUID

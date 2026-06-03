@@ -3,17 +3,88 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.schemas.common import OSFamily
-from app.schemas.evidence import EvidenceListResponse, EvidenceRead, EvidenceRegister
-from app.services import evidence_service
+from app.schemas.evidence import (
+    EvidenceChunkUploadResponse,
+    EvidenceChunkedUploadInitiate,
+    EvidenceChunkedUploadInitiateResponse,
+    EvidenceListResponse,
+    EvidenceRead,
+    EvidenceRegister,
+)
+from app.services import evidence_service, evidence_upload_session_service
 from app.services.errors import NotFoundError, ValidationError
 from app.storage.client import ObjectStorageClient, get_storage_client
 
 router = APIRouter()
+
+
+@router.post(
+    "/uploads/initiate",
+    response_model=EvidenceChunkedUploadInitiateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def initiate_chunked_evidence_upload(
+    payload: EvidenceChunkedUploadInitiate,
+    db: Session = Depends(get_db),
+):
+    try:
+        return evidence_upload_session_service.initiate_upload_session(db, payload)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.put(
+    "/uploads/{upload_id}/chunks/{chunk_index}",
+    response_model=EvidenceChunkUploadResponse,
+)
+async def upload_evidence_chunk(
+    request: Request,
+    upload_id: UUID,
+    chunk_index: int = Path(..., ge=0),
+):
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if content_type != evidence_upload_session_service.CHUNK_CONTENT_TYPE:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="chunk must use application/octet-stream")
+    try:
+        return await evidence_upload_session_service.write_upload_chunk(upload_id, chunk_index, request.stream())
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/uploads/{upload_id}/complete", response_model=EvidenceRead, status_code=status.HTTP_201_CREATED)
+def complete_chunked_evidence_upload(
+    upload_id: UUID,
+    db: Session = Depends(get_db),
+    storage_client: ObjectStorageClient = Depends(get_storage_client),
+):
+    try:
+        return evidence_upload_session_service.complete_upload_session(db, storage_client, upload_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="evidence upload could not be completed") from exc
+
+
+@router.delete("/uploads/{upload_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_chunked_evidence_upload(upload_id: UUID):
+    try:
+        evidence_upload_session_service.cancel_upload_session(upload_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return None
 
 
 @router.post("/upload", response_model=EvidenceRead, status_code=status.HTTP_201_CREATED)

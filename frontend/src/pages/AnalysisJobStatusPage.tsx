@@ -66,19 +66,60 @@ function terminalResultEmptyMessage(jobStatus: string, completedMessage: string)
   return completedMessage;
 }
 
+const YARA_PLUGIN_NAMES = new Set(["windows.vadyarascan", "yarascan", "linux.vmayarascan"]);
+
 function normalizedPluginProfile(profile: string | null | undefined): string | null {
   const normalized = (profile ?? "").trim().toLowerCase();
   if (!normalized || normalized === "not recorded") return null;
   return normalized;
 }
 
-function yaraStatusMessage(job: AnalysisJob, hasYaraResults: boolean): string {
+function pluginResultName(pluginResult: PluginResult): string {
+  return (pluginResult.plugin_name || pluginResult.source_plugin || "").trim();
+}
+
+function isYaraPluginResult(pluginResult: PluginResult): boolean {
+  const extraData = asRecord(pluginResult.extra_data);
+  return YARA_PLUGIN_NAMES.has(pluginResultName(pluginResult)) || extraData.is_yara_plugin === true;
+}
+
+function timeoutSeconds(pluginResult: PluginResult): number | null {
+  const value = asRecord(pluginResult.extra_data).timeout_seconds;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isTimedOutPlugin(pluginResult: PluginResult): boolean {
+  const extraData = asRecord(pluginResult.extra_data);
+  return extraData.timed_out === true
+    || extraData.timeout_reason === "plugin_timeout"
+    || (pluginResult.error_message ?? "").toLowerCase().includes("timed out");
+}
+
+function yaraStatusMessage(job: AnalysisJob, pluginResults: PluginResult[], hasYaraResults: boolean): string {
+  const yaraPluginResults = pluginResults.filter(isYaraPluginResult);
+  const timedOut = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "failed" && isTimedOutPlugin(pluginResult));
+  if (timedOut) {
+    const timeout = timeoutSeconds(timedOut);
+    return timeout === null
+      ? `YARA scanning was selected but ${pluginResultName(timedOut)} timed out.`
+      : `YARA scanning was selected but ${pluginResultName(timedOut)} timed out after ${timeout} seconds.`;
+  }
+
+  const failed = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "failed");
+  if (failed) return `YARA scanning was selected but ${pluginResultName(failed)} failed: ${failed.error_message || "No detailed error was recorded."}`;
+
+  const skipped = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "skipped");
+  if (skipped) return `YARA scanning was selected but ${pluginResultName(skipped)} was skipped: ${skipped.error_message || "No detailed skip reason was recorded."}`;
+
+  const completed = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "completed");
+  if (completed && hasYaraResults) return "YARA scanning completed and YARA-related results are available below.";
+  if (completed) return "YARA scanning completed; no YARA match artifacts or YARA IOC records were recorded.";
+
   const pluginProfile = normalizedPluginProfile(job.plugin_profile);
   if (!pluginProfile) return "No YARA profile was recorded for this job.";
   if (pluginProfile === "windows_default") return "YARA was not selected for this analysis profile.";
-  if (pluginProfile === "windows_memory_yara" && hasYaraResults) return "YARA-related results are available below.";
   if (pluginProfile === "windows_memory_yara") {
-    return "YARA was requested, but exact skipped/no-match status is not available through the current results APIs.";
+    return "YARA was requested, but YARA plugin status is not available through the current results APIs.";
   }
   return "YARA status is not available for this analysis profile.";
 }
@@ -367,7 +408,7 @@ export function AnalysisJobStatusPage() {
   const moduleIocs = useMemo(() => iocs.filter(isModuleOrPathIOC), [iocs]);
   const memoryIocs = useMemo(() => iocs.filter(isMemoryRegionIOC), [iocs]);
   const yaraIocs = useMemo(() => iocs.filter(isYaraIOC), [iocs]);
-  const yaraMessage = job ? yaraStatusMessage(job, yaraFindings.length > 0 || yaraIocs.length > 0) : "No YARA profile was recorded for this job.";
+  const yaraMessage = job ? yaraStatusMessage(job, pluginResults, yaraFindings.length > 0 || yaraIocs.length > 0 || yaraMatches.length > 0) : "No YARA profile was recorded for this job.";
   const pidOptions = useMemo(
     () => collectPidOptions(findings, processArtifacts, commandArtifacts, networkArtifacts, moduleArtifacts, memoryRegions, yaraMatches),
     [commandArtifacts, findings, memoryRegions, moduleArtifacts, networkArtifacts, processArtifacts, yaraMatches],

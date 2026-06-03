@@ -27,6 +27,36 @@ export interface EvidenceRegisterPayload {
   acquisition_time?: string | null;
 }
 
+export interface EvidenceChunkedUploadInitiatePayload {
+  case_id: string;
+  original_filename: string;
+  size_bytes: number;
+  os_family?: OSFamily;
+  os_version?: string | null;
+  architecture?: string | null;
+  kernel_version?: string | null;
+  symbol_table?: string | null;
+  acquisition_tool?: string | null;
+  acquisition_time?: string | null;
+  chunk_size?: number | null;
+}
+
+export interface EvidenceChunkedUploadInitiateResponse {
+  upload_id: string;
+  chunk_size: number;
+  max_size_bytes: number;
+  total_chunks: number;
+  expires_at: string | null;
+}
+
+export interface EvidenceChunkUploadResponse {
+  upload_id: string;
+  chunk_index: number;
+  received_chunks: number;
+  total_chunks: number;
+  uploaded_bytes: number;
+}
+
 export function uploadEvidence(formData: FormData): Promise<Evidence> {
   return apiRequest<Evidence>("/api/v1/evidences/upload", {
     method: "POST",
@@ -38,6 +68,41 @@ export function registerEvidence(payload: EvidenceRegisterPayload): Promise<Evid
   return apiRequest<Evidence>("/api/v1/evidences/register", {
     method: "POST",
     body: jsonBody(payload),
+  });
+}
+
+export function initiateEvidenceUpload(
+  payload: EvidenceChunkedUploadInitiatePayload,
+): Promise<EvidenceChunkedUploadInitiateResponse> {
+  return apiRequest<EvidenceChunkedUploadInitiateResponse>("/api/v1/evidences/uploads/initiate", {
+    method: "POST",
+    body: jsonBody(payload),
+  });
+}
+
+export function uploadEvidenceChunk(
+  uploadId: string,
+  chunkIndex: number,
+  chunk: Blob,
+  signal?: AbortSignal,
+): Promise<EvidenceChunkUploadResponse> {
+  return apiRequest<EvidenceChunkUploadResponse>(`/api/v1/evidences/uploads/${uploadId}/chunks/${chunkIndex}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: chunk,
+    signal,
+  });
+}
+
+export function completeEvidenceUpload(uploadId: string): Promise<Evidence> {
+  return apiRequest<Evidence>(`/api/v1/evidences/uploads/${uploadId}/complete`, {
+    method: "POST",
+  });
+}
+
+export function cancelEvidenceUpload(uploadId: string): Promise<void> {
+  return apiRequest<void>(`/api/v1/evidences/uploads/${uploadId}`, {
+    method: "DELETE",
   });
 }
 

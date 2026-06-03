@@ -16,6 +16,9 @@ from app.volatility.registry import PluginDefinition
 from app.yara.rules import resolve_yara_rules_path
 
 
+YARA_PLUGIN_NAMES = {"windows.vadyarascan", "yarascan", "linux.vmayarascan"}
+
+
 @dataclass(frozen=True)
 class VolatilityRunResult:
     plugin_name: str
@@ -56,6 +59,16 @@ def short_error_message(message: str, max_length: int = 500) -> str:
 
 def raw_output_path_for_plugin(raw_dir: Path, plugin_name: str) -> Path:
     return raw_dir / f"{normalize_plugin_name_part(plugin_name)}.json"
+
+
+def is_yara_plugin(plugin_name: str) -> bool:
+    return plugin_name in YARA_PLUGIN_NAMES
+
+
+def plugin_timeout_seconds(plugin: PluginDefinition, settings: Settings) -> int:
+    if is_yara_plugin(plugin.name):
+        return settings.volatility_yara_timeout_seconds
+    return settings.volatility_plugin_timeout_seconds
 
 
 def write_raw_wrapper(
@@ -128,7 +141,13 @@ def run_volatility_plugin(
 ) -> VolatilityRunResult:
     runtime_settings = settings or get_settings()
     output_path = raw_output_path_for_plugin(raw_dir, plugin.name)
-    plugin_extra_data = {"requires_yara_rules": plugin.requires_yara_rules}
+    timeout_seconds = plugin_timeout_seconds(plugin, runtime_settings)
+    plugin_extra_data = {
+        "requires_yara_rules": plugin.requires_yara_rules,
+        "plugin_name": plugin.name,
+        "is_yara_plugin": is_yara_plugin(plugin.name),
+        "timeout_seconds": timeout_seconds,
+    }
 
     if not plugin.implemented:
         return skipped_plugin_result(raw_dir, plugin, "plugin is registered but not implemented for execution yet", plugin_extra_data)
@@ -152,7 +171,7 @@ def run_volatility_plugin(
             command,
             capture_output=True,
             text=True,
-            timeout=runtime_settings.volatility_plugin_timeout_seconds,
+            timeout=timeout_seconds,
             check=False,
         )
         duration_ms = duration_ms_since(started_at)
@@ -190,7 +209,8 @@ def run_volatility_plugin(
         duration_ms = duration_ms_since(started_at)
         stdout = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode(errors="replace")
         stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode(errors="replace")
-        error_message = short_error_message(f"Volatility plugin timed out after {runtime_settings.volatility_plugin_timeout_seconds}s")
+        error_message = short_error_message(f"Volatility plugin timed out after {timeout_seconds}s")
+        timeout_extra_data = {**plugin_extra_data, "timeout_reason": "plugin_timeout"}
         write_raw_wrapper(
             output_path,
             plugin,
@@ -202,7 +222,7 @@ def run_volatility_plugin(
             error_message,
             duration_ms,
             timed_out=True,
-            extra_data=plugin_extra_data,
+            extra_data=timeout_extra_data,
         )
         return VolatilityRunResult(
             plugin_name=plugin.name,
@@ -215,6 +235,6 @@ def run_volatility_plugin(
             stderr=stderr,
             error_message=error_message,
             duration_ms=duration_ms,
-            extra_data=plugin_extra_data,
+            extra_data=timeout_extra_data,
             timed_out=True,
         )

@@ -118,6 +118,7 @@
   {% else %}<p>No suspicious memory region artifacts were recorded.</p>{% endif %}
 
   <h2>YARA Matches</h2>
+  {% if yara_status and yara_status.message %}<p>{{ yara_status.message }}</p>{% endif %}
   {% if yara_matches %}
   <table>
     <tr><th>Rule</th><th>Namespace</th><th>Target</th><th>Offset</th><th>Source plugin</th></tr>
@@ -125,7 +126,7 @@
     <tr><td>{{ match.rule_name }}</td><td>{{ match.namespace or "" }}</td><td>{{ match.target_identifier or "" }}</td><td>{{ match.offset or "" }}</td><td>{{ match.source_plugin or "" }}</td></tr>
     {% endfor %}
   </table>
-  {% else %}<p>No YARA match artifacts were recorded.</p>{% endif %}
+  {% elif not yara_status or not yara_status.message %}<p>No YARA match artifacts were recorded.</p>{% endif %}
 
   <h2>IOC Table</h2>
   {% if iocs %}

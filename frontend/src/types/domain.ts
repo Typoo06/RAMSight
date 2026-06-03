@@ -160,6 +160,7 @@ export interface PluginResult {
   parsed_record_count: number | null;
   error_message: string | null;
   duration_ms: number | null;
+  extra_data: Record<string, unknown> | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;

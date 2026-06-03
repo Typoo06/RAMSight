@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     volatility_path: str = Field(default="vol", alias="VOLATILITY_PATH")
     volatility_symbol_path: str = Field(default="/opt/volatility/symbols", alias="VOLATILITY_SYMBOL_PATH")
     volatility_plugin_timeout_seconds: int = Field(default=300, alias="VOLATILITY_PLUGIN_TIMEOUT_SECONDS")
+    volatility_yara_timeout_seconds: int = Field(default=900, alias="VOLATILITY_YARA_TIMEOUT_SECONDS")
     volatility_yara_rules_path: str | None = Field(default=None, alias="VOLATILITY_YARA_RULES_PATH")
 
 

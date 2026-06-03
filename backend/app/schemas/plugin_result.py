@@ -24,6 +24,7 @@ class PluginResultRead(OrmModel):
     parsed_record_count: int | None
     error_message: str | None
     duration_ms: int | None
+    extra_data: dict | None
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime

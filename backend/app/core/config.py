@@ -1,6 +1,7 @@
 # Backend settings loaded from environment variables.
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,6 +36,12 @@ class Settings(BaseSettings):
     minio_bucket_raw_outputs: str = Field(default="raw-outputs", alias="MINIO_BUCKET_RAW_OUTPUTS")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     evidence_max_upload_bytes: int = Field(default=21474836480, alias="EVIDENCE_MAX_UPLOAD_BYTES")
+    evidence_upload_temp_dir: Path = Field(
+        default=Path("/tmp/ramsight-evidence-uploads"),
+        alias="EVIDENCE_UPLOAD_TEMP_DIR",
+    )
+    evidence_upload_chunk_size_bytes: int = Field(default=16777216, alias="EVIDENCE_UPLOAD_CHUNK_SIZE_BYTES")
+    evidence_upload_session_ttl_seconds: int = Field(default=86400, alias="EVIDENCE_UPLOAD_SESSION_TTL_SECONDS")
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

@@ -79,3 +79,50 @@ def test_report_context_preserves_final_job_status_metadata() -> None:
     assert context["analysis_job"]["status"] == "completed"
     assert context["analysis_job"]["duration_ms"] == 1234
     assert context["analysis_job"]["completed_at"] == datetime(2026, 5, 24, 12, 30, tzinfo=timezone.utc)
+
+
+def test_report_context_marks_yara_timeout_status() -> None:
+    case, evidence, job = base_rows()
+    job["plugin_profile"] = "windows_memory_yara"
+
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[
+            {
+                "plugin_name": "windows.vadyarascan",
+                "source_plugin": "windows.vadyarascan",
+                "status": "failed",
+                "error_message": "Volatility plugin timed out after 900s",
+                "extra_data": {"timeout_seconds": 900, "timeout_reason": "plugin_timeout", "is_yara_plugin": True},
+            }
+        ],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=[],
+        iocs=[],
+        generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    assert context["yara_status"]["status"] == "failed_timeout"
+    assert context["yara_status"]["timeout_seconds"] == 900
+    assert "timed out after 900 seconds" in context["yara_status"]["message"]
+
+
+def test_report_context_marks_yara_completed_zero_matches() -> None:
+    case, evidence, job = base_rows()
+    job["plugin_profile"] = "windows_memory_yara"
+
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[{"plugin_name": "windows.vadyarascan", "source_plugin": "windows.vadyarascan", "status": "completed", "extra_data": {"is_yara_plugin": True}}],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=[],
+        iocs=[],
+        generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    assert context["yara_status"]["status"] == "completed_no_matches"
+    assert context["yara_status"]["message"] == "YARA scanning completed; no YARA match artifacts were recorded."

@@ -61,3 +61,32 @@ def test_html_rendering_escapes_untrusted_values_and_includes_sections() -> None
     assert "<th>Duration ms</th><td>1234</td>" in html
     assert f"<th>Completed</th><td>{completed_at}</td>" in html
     assert "<script>alert(1)</script>" not in html
+
+
+def test_html_report_distinguishes_yara_timeout_from_no_match() -> None:
+    case_id = uuid4()
+    evidence_id = uuid4()
+    job_id = uuid4()
+    context = build_report_context(
+        case={"id": case_id, "case_code": "CASE-YARA-TIMEOUT", "name": "YARA timeout", "status": "open"},
+        evidence={"id": evidence_id, "case_id": case_id, "original_filename": "memory.raw", "source_type": "upload", "os_family": "windows"},
+        analysis_job={"id": job_id, "case_id": case_id, "evidence_id": evidence_id, "status": "completed", "os_family": "windows", "plugin_profile": "windows_memory_yara"},
+        plugin_results=[
+            {
+                "plugin_name": "windows.vadyarascan",
+                "source_plugin": "windows.vadyarascan",
+                "status": "failed",
+                "error_message": "Volatility plugin timed out after 900s",
+                "extra_data": {"timeout_seconds": 900, "timeout_reason": "plugin_timeout", "is_yara_plugin": True},
+            }
+        ],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=[],
+        iocs=[],
+        generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    html = render_technical_report(context, templates_dir())
+
+    assert "YARA scanning was selected but windows.vadyarascan timed out after 900 seconds." in html
+    assert "No YARA match artifacts were recorded." not in html
