@@ -60,6 +60,29 @@ curl http://localhost:8000/ready
 
 A `not_ready` response means one or more local dependencies need attention. Check service state and logs before rerunning large uploads or analysis jobs.
 
+
+## Demo Preflight
+
+Run the lightweight preflight before a local demo or thesis presentation. It checks backend health, backend readiness, the frontend URL, and whether Git is tracking memory-dump-like files. It does not upload evidence, download reports, or run a Volatility analysis job.
+
+```bash
+python scripts/demo/preflight_check.py
+```
+
+To include a completed analysis job summary without downloading generated files:
+
+```bash
+python scripts/demo/preflight_check.py --job-id <analysis-job-id>
+```
+
+For machine-readable output:
+
+```bash
+python scripts/demo/preflight_check.py --json
+```
+
+Use `--strict` with `--job-id` when optional job result endpoints should fail the preflight instead of producing warnings. A passing preflight means the local demo surface is reachable and basic dependencies are ready; it does not prove that a new large memory analysis will complete.
+
 ## Stale Upload Cleanup
 
 Browser chunked uploads use temporary disk space before the completed evidence file is uploaded to MinIO/S3. If the browser, backend, Docker, or WSL shuts down mid-upload, expired upload sessions can remain in the configured temp directory.
