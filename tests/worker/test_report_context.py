@@ -265,3 +265,121 @@ def test_report_context_deduplicates_and_caps_top_findings_for_display() -> None
     assert len(context["display_top_findings"]) == 1
     assert context["top_findings_omitted_count"] == 24
     assert context["display_top_findings"][0]["context_parts"] == ["PID 2924", "WinRAR.exe", "region 0x400000-0x401000"]
+
+
+def test_report_context_caps_and_prioritizes_network_display() -> None:
+    case, evidence, job = base_rows()
+    listener_rows = [
+        {
+            "id": uuid4(),
+            "protocol": "TCPv4",
+            "local_address": "0.0.0.0",
+            "local_port": 135,
+            "remote_address": "0.0.0.0",
+            "remote_port": None,
+            "state": "LISTENING",
+            "pid": 888,
+            "process_name": "svchost.exe",
+            "source_plugin": "windows.netscan",
+        }
+        for _ in range(12)
+    ]
+    public_row = {
+        "id": uuid4(),
+        "protocol": "TCPv4",
+        "local_address": "10.0.2.15",
+        "local_port": 49222,
+        "remote_address": "8.8.8.8",
+        "remote_port": 443,
+        "state": "ESTABLISHED",
+        "pid": 2924,
+        "process_name": "WinRAR.exe",
+        "source_plugin": "windows.netscan",
+    }
+    artifacts = {
+        "process_artifacts": [],
+        "network_artifacts": listener_rows + [public_row],
+        "module_artifacts": [],
+        "memory_region_artifacts": [],
+        "command_artifacts": [],
+        "yara_matches": [],
+    }
+
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[],
+        artifacts=artifacts,
+        risk_findings=[],
+        iocs=[{"ioc_type": "network_endpoint", "value": "8.8.8.8:443", "extra_data": {"pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443}}],
+    )
+
+    display = context["network_display"]
+    assert display["total_count"] == 13
+    assert display["displayed_count"] == 2
+    assert display["omitted_count"] == 11
+    assert display["rows"][0]["remote_endpoint"] == "8.8.8.8:443"
+    assert display["rows"][0]["reason"] == "Public remote endpoint"
+    assert display["rows"][1]["reason"] == "Listening service socket shown as context"
+    assert display["rows"][1]["similar_count"] == 12
+
+
+def test_report_context_groups_module_paths_and_annotates_microsoft_context() -> None:
+    case, evidence, job = base_rows()
+    unknown_module_id = uuid4()
+    onedrive_modules = [
+        {
+            "id": uuid4(),
+            "pid": 6620,
+            "process_name": "OneDrive.exe",
+            "module_name": f"component{index}.dll",
+            "module_path": f"C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\component{index}.dll",
+            "source_plugin": "windows.dlllist",
+        }
+        for index in range(5)
+    ]
+    modules = onedrive_modules + [
+        {
+            "id": uuid4(),
+            "pid": 7000,
+            "process_name": "msedge.exe",
+            "module_name": "msedge.dll",
+            "module_path": "C:/Users/analyst/AppData/Local/Microsoft/Edge/Application/msedge.dll",
+            "source_plugin": "windows.dlllist",
+        },
+        {
+            "id": unknown_module_id,
+            "pid": 2924,
+            "process_name": "WinRAR.exe",
+            "module_name": "payload.dll",
+            "module_path": "C:\\Users\\analyst\\AppData\\Local\\OddVendor\\payload.dll",
+            "source_plugin": "windows.dlllist",
+        },
+        {
+            "id": uuid4(),
+            "pid": 500,
+            "process_name": "system.exe",
+            "module_name": "kernel32.dll",
+            "module_path": "C:\\Windows\\System32\\kernel32.dll",
+            "source_plugin": "windows.dlllist",
+        },
+    ]
+    artifacts = {"process_artifacts": [], "network_artifacts": [], "module_artifacts": modules, "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []}
+    findings = [{"id": uuid4(), "artifact_type": "module_artifacts", "artifact_id": unknown_module_id, "severity": "high", "score": 8}]
+
+    context = build_report_context(case, evidence, job, plugin_results=[], artifacts=artifacts, risk_findings=findings, iocs=[])
+
+    display = context["module_display"]
+    assert display["total_count"] == 8
+    assert display["selected_count"] == 7
+    assert display["displayed_count"] == 3
+    assert display["omitted_count"] == 4
+    assert display["known_context_count"] == 6
+    assert display["suspicious_count"] == 1
+    assert display["rows"][0]["classification"] == "Unknown or user-writable module path"
+    assert display["rows"][0]["module_path"].endswith("OddVendor\\payload.dll")
+    known_rows = [row for row in display["rows"] if row["classification"].startswith("Known Microsoft AppData context")]
+    assert known_rows
+    assert any(row["similar_count"] == 5 and "onedrive" in row["classification"] for row in known_rows)
+    assert all("standalone proof of compromise" in row["context_note"] for row in known_rows)

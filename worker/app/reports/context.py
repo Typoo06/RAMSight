@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import ipaddress
 from typing import Iterable
 import re
 
+from app.detection.path_reputation import known_microsoft_appdata_path, normalize_windows_path
+from app.parsers.common import is_path_like
 from app.reports.recommendations import generate_recommendations
 
 TOP_FINDINGS_LIMIT = 20
 TOP_PROCESS_LIMIT = 10
 SECTION_ROW_LIMIT = 50
+NETWORK_DISPLAY_LIMIT = 20
+MODULE_DISPLAY_LIMIT = 20
 IOC_REPRESENTATIVE_LIMIT = 5
 YARA_REPRESENTATIVE_LIMIT = 5
 ERROR_SUMMARY_LIMIT = 180
@@ -167,6 +172,273 @@ def suspicious_modules(modules: list[dict], findings: list[dict]) -> list[dict]:
         if str(module.get("id")) in finding_artifact_ids or any(fragment in path for fragment in ["/temp/", "/appdata/", "/users/public/", "/tmp/"]):
             selected.append(module)
     return limited(selected)
+
+
+
+def _artifact_ids_by_type(findings: list[dict], artifact_type: str) -> set[str]:
+    ids = set()
+    for finding in findings:
+        if finding.get("artifact_type") != artifact_type:
+            continue
+        artifact_id = finding.get("artifact_id")
+        if artifact_id is not None:
+            ids.add(str(artifact_id))
+    return ids
+
+
+def _is_public_ip(value) -> bool:
+    text = _raw_text(value)
+    if not text:
+        return False
+    cleaned = text.strip("[]")
+    if "%" in cleaned:
+        cleaned = cleaned.split("%", 1)[0]
+    try:
+        address = ipaddress.ip_address(cleaned)
+    except ValueError:
+        return False
+    return address.is_global
+
+
+def _is_empty_or_wildcard_address(value) -> bool:
+    text = (_raw_text(value) or "").strip().lower()
+    return text in {"", "*", "0.0.0.0", "::", "::0", "[::]", "0", "none", "n/a"}
+
+
+def _network_artifact_linked(row: dict, findings: list[dict], iocs: list[dict]) -> bool:
+    row_id = row.get("id")
+    if row_id is not None and str(row_id) in _artifact_ids_by_type(findings, "network_artifacts"):
+        return True
+
+    remote_address = _raw_text(row.get("remote_address"))
+    remote_port = row.get("remote_port")
+    pid = _pid_key(row.get("pid"))
+    endpoint = _network_endpoint(row)
+    for ioc in iocs:
+        ioc_value = _raw_text(ioc.get("value"))
+        extra = _extra_data(ioc)
+        if endpoint and ioc_value == endpoint:
+            return True
+        if remote_address and ioc_value == remote_address:
+            return True
+        if remote_address and extra.get("remote_address") == remote_address and (remote_port is None or extra.get("remote_port") == remote_port):
+            return True
+        if pid and _pid_key(extra.get("pid")) == pid and remote_address and extra.get("remote_address") == remote_address:
+            return True
+    return False
+
+
+def _network_display_score(row: dict, findings: list[dict], iocs: list[dict]) -> tuple[int, int]:
+    state = str(row.get("state") or "").strip().lower()
+    remote_address = row.get("remote_address")
+    remote_port = row.get("remote_port")
+    score = 0
+    if _is_public_ip(remote_address):
+        score += 60
+    if remote_port is not None and not _is_empty_or_wildcard_address(remote_address):
+        score += 15
+    if state in {"established", "syn_sent", "syn_recv", "close_wait", "time_wait"}:
+        score += 15
+    if _network_artifact_linked(row, findings, iocs):
+        score += 30
+    if state == "listening":
+        score -= 25
+    if _is_empty_or_wildcard_address(remote_address) or remote_port is None:
+        score -= 15
+    return score, _int_value(row.get("pid"), -1)
+
+
+def _network_dedupe_key(row: dict) -> tuple:
+    state = str(row.get("state") or "").strip().lower()
+    remote_address = _raw_text(row.get("remote_address"))
+    remote_port = row.get("remote_port")
+    protocol = str(row.get("protocol") or "").strip().lower()
+    local_address = _raw_text(row.get("local_address"))
+    local_port = row.get("local_port")
+    pid = _pid_key(row.get("pid"))
+    process_name = str(row.get("process_name") or "").strip().lower()
+    if state == "listening" and (_is_empty_or_wildcard_address(remote_address) or remote_port is None):
+        return ("listener", protocol, local_port, pid, process_name)
+    return (
+        protocol,
+        local_address,
+        local_port,
+        remote_address,
+        remote_port,
+        state,
+        pid,
+        process_name,
+        row.get("source_plugin"),
+    )
+
+
+def _endpoint(address, port) -> str:
+    text = _raw_text(address)
+    if not text:
+        return "N/A"
+    return f"{text}:{port}" if port is not None else text
+
+
+def _network_display_reason(row: dict, linked: bool) -> str:
+    state = str(row.get("state") or "").strip().lower()
+    if _is_public_ip(row.get("remote_address")):
+        return "Public remote endpoint"
+    if linked:
+        return "Linked to finding or IOC context"
+    if state == "listening":
+        return "Listening service socket shown as context"
+    return "Network artifact context"
+
+
+def build_network_display(network_rows: list[dict], findings: list[dict], iocs: list[dict], limit: int = NETWORK_DISPLAY_LIMIT) -> dict:
+    buckets: dict[tuple, dict] = {}
+    for row in network_rows:
+        key = _network_dedupe_key(row)
+        score, pid_score = _network_display_score(row, findings, iocs)
+        linked = _network_artifact_linked(row, findings, iocs)
+        bucket = buckets.get(key)
+        if bucket is None:
+            buckets[key] = {"row": row, "count": 1, "sort_key": (score, pid_score), "linked": linked}
+            continue
+        bucket["count"] += 1
+        bucket["linked"] = bucket["linked"] or linked
+        if (score, pid_score) > bucket["sort_key"]:
+            bucket["row"] = row
+            bucket["sort_key"] = (score, pid_score)
+
+    sorted_buckets = sorted(buckets.values(), key=lambda item: item["sort_key"], reverse=True)
+    rows = []
+    for bucket in sorted_buckets[:limit]:
+        row = bucket["row"]
+        rows.append(
+            {
+                "protocol": _text(row.get("protocol"), ""),
+                "local_endpoint": _endpoint(row.get("local_address"), row.get("local_port")),
+                "remote_endpoint": _endpoint(row.get("remote_address"), row.get("remote_port")),
+                "state": _text(row.get("state"), ""),
+                "pid": _text(row.get("pid"), ""),
+                "process_name": _text(row.get("process_name"), ""),
+                "source_plugin": _text(row.get("source_plugin"), ""),
+                "reason": _network_display_reason(row, bucket["linked"]),
+                "similar_count": bucket["count"],
+            }
+        )
+    return {
+        "rows": rows,
+        "total_count": len(network_rows),
+        "displayed_count": len(rows),
+        "omitted_count": max(len(network_rows) - len(rows), 0),
+        "note": "This table is capped for readability. Full normalized artifacts remain available through the platform/API.",
+    }
+
+
+def _artifact_os_family(row: dict, path: str | None = None) -> str:
+    value = _raw_text(row.get("os_family"))
+    if value:
+        return value.lower()
+    source_plugin = _raw_text(row.get("source_plugin"))
+    if source_plugin and source_plugin.startswith("windows."):
+        return "windows"
+    if source_plugin and source_plugin.startswith("linux."):
+        return "linux"
+    if path and ("\\" in path or ":/" in path):
+        return "windows"
+    return "unknown"
+
+
+def _is_user_writable_module_path(path: str, os_family: str) -> bool:
+    if not is_path_like(path, os_family):
+        return False
+    normalized = normalize_windows_path(path) if os_family == "windows" else str(path or "").strip().lower()
+    fragments = ["/appdata/", "/temp/", "/users/public/", "/tmp/", "/downloads/"]
+    return any(fragment in normalized for fragment in fragments)
+
+
+def _module_group_key(row: dict, classification_key: str, root_key: str) -> tuple:
+    pid = _pid_key(row.get("pid"))
+    process_name = str(row.get("process_name") or "").strip().lower()
+    if classification_key == "known_microsoft_appdata":
+        return (classification_key, pid, process_name, root_key)
+    return (classification_key, pid, process_name, normalize_windows_path(row.get("module_path")))
+
+
+def _module_display_row(row: dict, classification: str, note: str, count: int, source_plugins: set[str]) -> dict:
+    return {
+        "process_name": _text(row.get("process_name"), ""),
+        "pid": _text(row.get("pid"), ""),
+        "module_name": _text(row.get("module_name"), ""),
+        "module_path": _text(row.get("module_path"), ""),
+        "source_plugin": ", ".join(sorted(source_plugins)) if source_plugins else _text(row.get("source_plugin"), ""),
+        "classification": classification,
+        "context_note": note,
+        "similar_count": count,
+    }
+
+
+def build_module_display(modules: list[dict], findings: list[dict], limit: int = MODULE_DISPLAY_LIMIT) -> dict:
+    finding_artifact_ids = _artifact_ids_by_type(findings, "module_artifacts")
+    buckets: dict[tuple, dict] = {}
+    selected_count = 0
+    known_context_count = 0
+    suspicious_count = 0
+
+    for module in modules:
+        path = _raw_text(module.get("module_path"))
+        if not path:
+            continue
+        os_family = _artifact_os_family(module, path)
+        known = known_microsoft_appdata_path(path, os_family)
+        linked = module.get("id") is not None and str(module.get("id")) in finding_artifact_ids
+        user_writable = _is_user_writable_module_path(path, os_family)
+        if not known and not linked and not user_writable:
+            continue
+
+        selected_count += 1
+        if known:
+            known_context_count += 1
+            classification_key = "known_microsoft_appdata"
+            classification = f"Known Microsoft AppData context ({known.app_name})"
+            note = "Context only; not treated as standalone proof of compromise."
+            root_key = known.normalized_root
+            priority = 10 if linked else 0
+        else:
+            suspicious_count += 1
+            classification_key = "unknown_user_writable"
+            classification = "Unknown or user-writable module path"
+            note = "Requires analyst review with process and memory-region context."
+            root_key = normalize_windows_path(path)
+            priority = 50 if linked else 35
+
+        key = _module_group_key(module, classification_key, root_key)
+        bucket = buckets.setdefault(
+            key,
+            {"row": module, "count": 0, "source_plugins": set(), "priority": priority, "classification": classification, "note": note},
+        )
+        bucket["count"] += 1
+        bucket["priority"] = max(bucket["priority"], priority)
+        source_plugin = _raw_text(module.get("source_plugin"))
+        if source_plugin:
+            bucket["source_plugins"].add(source_plugin)
+
+    sorted_buckets = sorted(
+        buckets.values(),
+        key=lambda item: (item["priority"], item["count"], str(item["row"].get("process_name") or "").lower()),
+        reverse=True,
+    )
+    rows = [
+        _module_display_row(bucket["row"], bucket["classification"], bucket["note"], bucket["count"], bucket["source_plugins"])
+        for bucket in sorted_buckets[:limit]
+    ]
+    return {
+        "rows": rows,
+        "total_count": len(modules),
+        "selected_count": selected_count,
+        "displayed_count": len(rows),
+        "omitted_count": max(selected_count - len(rows), 0),
+        "known_context_count": known_context_count,
+        "suspicious_count": suspicious_count,
+        "note": "Known Microsoft AppData module paths are shown as context and are not treated as standalone proof of compromise.",
+    }
 
 
 def _plugin_name(plugin: dict) -> str:
@@ -647,6 +919,8 @@ def build_report_context(
     yara_status = build_yara_status(row_dict(analysis_job), plugin_results_limited, yara_matches_limited)
     display_top, omitted_count = build_display_top_findings(risk_findings)
     process_groups = build_process_finding_groups(risk_findings)
+    network_display = build_network_display(artifacts.get("network_artifacts", []), risk_findings, iocs)
+    module_display = build_module_display(artifacts.get("module_artifacts", []), risk_findings)
     context = {
         "product_name": "RAMSight",
         "report_title": "RAMSight Technical Analysis Report",
@@ -663,8 +937,10 @@ def build_report_context(
         "process_risk_summaries": limited([finding for finding in risk_findings if finding.get("category") == "process_risk_summary"]),
         "process_finding_groups": limited(process_groups),
         "process_artifacts": limited(artifacts.get("process_artifacts", [])),
-        "network_indicators": limited(artifacts.get("network_artifacts", [])),
-        "module_artifacts": suspicious_modules(artifacts.get("module_artifacts", []), risk_findings),
+        "network_display": network_display,
+        "network_indicators": network_display["rows"],
+        "module_display": module_display,
+        "module_artifacts": module_display["rows"],
         "memory_regions": limited(artifacts.get("memory_region_artifacts", [])),
         "command_artifacts": limited(artifacts.get("command_artifacts", [])),
         "yara_matches": yara_matches_limited,

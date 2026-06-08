@@ -181,3 +181,98 @@ def test_html_report_includes_display_cap_note_and_plugin_status_table() -> None
     assert "Parsed records" in html
     assert "windows.pslist" in html
     assert "21 additional similar or lower-priority findings were omitted" in html
+
+
+def test_html_report_renders_capped_artifact_sections_with_context_notes() -> None:
+    case_id = uuid4()
+    evidence_id = uuid4()
+    job_id = uuid4()
+    module_id = uuid4()
+    listener_rows = [
+        {
+            "id": uuid4(),
+            "protocol": "TCPv4",
+            "local_address": "0.0.0.0",
+            "local_port": 135,
+            "remote_address": "0.0.0.0",
+            "remote_port": None,
+            "state": "LISTENING",
+            "pid": 888,
+            "process_name": "svchost.exe",
+            "source_plugin": "windows.netscan",
+        }
+        for _ in range(4)
+    ]
+    context = build_report_context(
+        case={"id": case_id, "case_code": "CASE-DISPLAY", "name": "Display", "status": "open"},
+        evidence={"id": evidence_id, "case_id": case_id, "original_filename": "memory.raw", "source_type": "upload", "os_family": "windows"},
+        analysis_job={"id": job_id, "case_id": case_id, "evidence_id": evidence_id, "status": "completed", "os_family": "windows"},
+        plugin_results=[],
+        artifacts={
+            "process_artifacts": [],
+            "network_artifacts": listener_rows
+            + [
+                {
+                    "id": uuid4(),
+                    "protocol": "TCPv4",
+                    "local_address": "10.0.2.15",
+                    "local_port": 49222,
+                    "remote_address": "8.8.8.8",
+                    "remote_port": 443,
+                    "state": "ESTABLISHED",
+                    "pid": 2924,
+                    "process_name": "WinRAR.exe",
+                    "source_plugin": "windows.netscan",
+                }
+            ],
+            "module_artifacts": [
+                {
+                    "id": uuid4(),
+                    "pid": 6620,
+                    "process_name": "OneDrive.exe",
+                    "module_name": "FileSyncShell64.dll",
+                    "module_path": "C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\FileSyncShell64.dll",
+                    "source_plugin": "windows.dlllist",
+                },
+                {
+                    "id": uuid4(),
+                    "pid": 6620,
+                    "process_name": "OneDrive.exe",
+                    "module_name": "Telemetry.dll",
+                    "module_path": "C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\Telemetry.dll",
+                    "source_plugin": "windows.dlllist",
+                },
+                {
+                    "id": module_id,
+                    "pid": 2924,
+                    "process_name": "WinRAR.exe",
+                    "module_name": "payload.dll",
+                    "module_path": "C:\\Users\\analyst\\AppData\\Local\\OddVendor\\payload.dll",
+                    "source_plugin": "windows.dlllist",
+                },
+            ],
+            "memory_region_artifacts": [],
+            "command_artifacts": [],
+            "yara_matches": [],
+        },
+        risk_findings=[{"id": uuid4(), "artifact_type": "module_artifacts", "artifact_id": module_id, "severity": "high", "score": 8, "extra_data": {"pid": 2924, "process_name": "WinRAR.exe"}}],
+        iocs=[{"ioc_type": "network_endpoint", "value": "8.8.8.8:443", "confidence": 80, "source_plugin": "windows.netscan", "extra_data": {"pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443}}],
+        generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    html = render_technical_report(context, templates_dir())
+
+    assert "Executive Summary" in html
+    assert "Memory-only Evidence Chains" in html
+    assert "IOC Summary" in html
+    assert "This table is capped for readability" in html
+    assert "Showing 2 of 5 network artifacts. 3 rows were omitted" in html
+    assert "Public remote endpoint" in html
+    assert "Listening service socket shown as context" in html
+    assert "Known Microsoft AppData module paths are shown as context" in html
+    assert "Known Microsoft AppData context (onedrive)" in html
+    assert "Unknown or user-writable module path" in html
+    assert "standalone proof of compromise" in html
+    assert "Showing 2 representative module-path rows from 3 selected module artifacts" in html
+    assert "{&#39;pid&#39;" not in html
+    assert "{'pid':" not in html

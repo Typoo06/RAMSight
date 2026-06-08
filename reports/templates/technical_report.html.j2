@@ -171,25 +171,68 @@
     {% endfor %}
   {% else %}<p>No process-centered memory-only evidence chains were available.</p>{% endif %}
 
-  <h2>Network Indicators</h2>
-  {% if network_indicators %}
+  <h2>IOC Summary</h2>
+  <p class="muted">{{ ioc_export_note }}</p>
+  {% if ioc_summary %}
   <table>
-    <tr><th>Protocol</th><th>Local</th><th>Remote</th><th>State</th><th>PID</th><th>Process</th></tr>
-    {% for item in network_indicators %}
-    <tr><td>{{ item.protocol or "" }}</td><td>{{ item.local_address }}:{{ item.local_port }}</td><td>{{ item.remote_address }}:{{ item.remote_port }}</td><td>{{ item.state or "" }}</td><td>{{ item.pid or "" }}</td><td>{{ item.process_name or "" }}</td></tr>
+    <tr><th>IOC type</th><th>Count</th><th>Representative values</th><th>Source plugins</th><th>Confidence range</th></tr>
+    {% for row in ioc_summary %}
+    <tr>
+      <td>{{ row.ioc_type }}</td>
+      <td>{{ row.count }}</td>
+      <td>{% if row.representative_values %}<ul>{% for value in row.representative_values %}<li>{{ value }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      <td>{% if row.source_plugins %}{% for plugin in row.source_plugins %}{{ plugin }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>{{ row.confidence_range }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No IOC records were extracted.</p>{% endif %}
+
+  <h2>Network Indicators</h2>
+  {% if network_display %}
+  <p class="muted">{{ network_display.note }}</p>
+  <p class="muted">Showing {{ network_display.displayed_count }} of {{ network_display.total_count }} network artifacts. {{ network_display.omitted_count }} rows were omitted from this display section.</p>
+  {% endif %}
+  {% if network_display and network_display.rows %}
+  <table>
+    <tr><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th><th>State</th><th>PID</th><th>Process</th><th>Display context</th><th>Similar rows</th></tr>
+    {% for item in network_display.rows %}
+    <tr>
+      <td>{{ item.protocol }}</td>
+      <td>{{ item.local_endpoint }}</td>
+      <td>{{ item.remote_endpoint }}</td>
+      <td>{{ item.state }}</td>
+      <td>{{ item.pid }}</td>
+      <td>{{ item.process_name }}</td>
+      <td>{{ item.reason }}</td>
+      <td>{{ item.similar_count }}</td>
+    </tr>
     {% endfor %}
   </table>
   {% else %}<p>No network artifacts are available for this report section.</p>{% endif %}
 
   <h2>Suspicious Module Paths</h2>
-  {% if module_artifacts %}
+  {% if module_display %}
+  <p class="muted">{{ module_display.note }}</p>
+  <p class="muted">Showing {{ module_display.displayed_count }} representative module-path rows from {{ module_display.selected_count }} selected module artifacts ({{ module_display.total_count }} total module artifacts). {{ module_display.omitted_count }} similar rows were omitted.</p>
+  {% endif %}
+  {% if module_display and module_display.rows %}
   <table>
-    <tr><th>Process</th><th>PID</th><th>Module</th><th>Path</th><th>Source plugin</th></tr>
-    {% for module in module_artifacts %}
-    <tr><td>{{ module.process_name or "" }}</td><td>{{ module.pid or "" }}</td><td>{{ module.module_name or "" }}</td><td>{{ module.module_path or "" }}</td><td>{{ module.source_plugin or "" }}</td></tr>
+    <tr><th>Process</th><th>PID</th><th>Module</th><th>Path</th><th>Classification</th><th>Context note</th><th>Source plugin</th><th>Similar rows</th></tr>
+    {% for module in module_display.rows %}
+    <tr>
+      <td>{{ module.process_name }}</td>
+      <td>{{ module.pid }}</td>
+      <td>{{ module.module_name }}</td>
+      <td>{{ module.module_path }}</td>
+      <td>{{ module.classification }}</td>
+      <td>{{ module.context_note }}</td>
+      <td>{{ module.source_plugin }}</td>
+      <td>{{ module.similar_count }}</td>
+    </tr>
     {% endfor %}
   </table>
-  {% else %}<p>No suspicious module path artifacts were selected.</p>{% endif %}
+  {% else %}<p>No suspicious module path artifacts were selected for this capped display section.</p>{% endif %}
 
   <h2>Memory Region Findings</h2>
   {% if memory_regions %}
@@ -218,23 +261,6 @@
     {% endfor %}
   </table>
   {% elif not yara_status or not yara_status.message %}<p>No YARA match artifacts were recorded.</p>{% endif %}
-
-  <h2>IOC Summary</h2>
-  <p class="muted">{{ ioc_export_note }}</p>
-  {% if ioc_summary %}
-  <table>
-    <tr><th>IOC type</th><th>Count</th><th>Representative values</th><th>Source plugins</th><th>Confidence range</th></tr>
-    {% for row in ioc_summary %}
-    <tr>
-      <td>{{ row.ioc_type }}</td>
-      <td>{{ row.count }}</td>
-      <td>{% if row.representative_values %}<ul>{% for value in row.representative_values %}<li>{{ value }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
-      <td>{% if row.source_plugins %}{% for plugin in row.source_plugins %}{{ plugin }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
-      <td>{{ row.confidence_range }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<p>No IOC records were extracted.</p>{% endif %}
 
   <h2>Raw and Parsed Output References</h2>
   <table>
