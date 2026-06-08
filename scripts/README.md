@@ -19,3 +19,5 @@ python scripts/demo/preflight_check.py --job-id <analysis-job-id>
 ```
 
 Use `--json` for machine-readable output and `--strict` to make optional job result endpoint failures fail the preflight.
+
+For a full presentation workflow, see the [local defense runbook](../docs/demo/local-defense-runbook.md).
