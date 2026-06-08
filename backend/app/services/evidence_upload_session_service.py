@@ -293,6 +293,94 @@ def complete_upload_session(
         raise
 
 
+def _is_uuid_directory(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    try:
+        UUID(path.name)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_datetime_expired(value: datetime | None, now: datetime) -> bool:
+    if value is None:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return now > value
+
+
+def _is_stale_by_mtime(path: Path, ttl_seconds: int, now: datetime) -> bool:
+    if ttl_seconds <= 0:
+        return False
+    try:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return False
+    return now - mtime > timedelta(seconds=ttl_seconds)
+
+
+def cleanup_expired_upload_sessions(settings: Settings | None = None, now: datetime | None = None) -> dict[str, int]:
+    settings = _settings(settings)
+    root = _upload_root(settings)
+    current_time = now or _utcnow()
+    ttl_seconds = settings.evidence_upload_session_ttl_seconds
+    counts = {
+        "scanned": 0,
+        "removed": 0,
+        "expired": 0,
+        "corrupt_stale": 0,
+        "active": 0,
+        "ignored": 0,
+        "errors": 0,
+    }
+
+    for child in root.iterdir():
+        if not _is_uuid_directory(child):
+            counts["ignored"] += 1
+            continue
+
+        counts["scanned"] += 1
+        manifest_file = _manifest_path(child)
+        remove_reason: str | None = None
+        if manifest_file.is_file():
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+                expires_at = _parse_datetime(manifest.get("expires_at"))
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                if _is_stale_by_mtime(child, ttl_seconds, current_time):
+                    remove_reason = "corrupt_stale"
+                else:
+                    counts["active"] += 1
+                    continue
+            else:
+                if _is_datetime_expired(expires_at, current_time):
+                    remove_reason = "expired"
+                else:
+                    counts["active"] += 1
+                    continue
+        elif _is_stale_by_mtime(child, ttl_seconds, current_time):
+            remove_reason = "corrupt_stale"
+        else:
+            counts["active"] += 1
+            continue
+
+        try:
+            shutil.rmtree(child)
+        except OSError:
+            counts["errors"] += 1
+            continue
+
+        counts["removed"] += 1
+        if remove_reason == "expired":
+            counts["expired"] += 1
+        elif remove_reason == "corrupt_stale":
+            counts["corrupt_stale"] += 1
+
+    return counts
+
+
 def cancel_upload_session(upload_id: UUID | str, settings: Settings | None = None) -> None:
     settings = _settings(settings)
     session_dir = _session_dir(upload_id, settings)

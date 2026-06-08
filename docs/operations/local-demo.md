@@ -1,0 +1,107 @@
+# Local Demo Operations
+
+RAMSight is currently intended for local university-project validation and demo workflows. These commands keep the Docker Compose environment predictable while handling large memory evidence safely.
+
+## Start Services
+
+Build and start the local stack:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Start already-built services in the background:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d postgres redis minio backend worker frontend
+```
+
+Check container state:
+
+```bash
+docker compose -f docker-compose.dev.yml ps
+```
+
+## Rebuild Images
+
+Rebuild the application images after dependency or Dockerfile changes:
+
+```bash
+docker compose --progress=plain -f docker-compose.dev.yml build backend worker frontend
+```
+
+## Database Migrations
+
+Run migrations from the backend container so Compose service names resolve correctly:
+
+```bash
+docker compose -f docker-compose.dev.yml exec backend alembic upgrade head
+```
+
+Inspect the current revision:
+
+```bash
+docker compose -f docker-compose.dev.yml exec backend alembic current
+```
+
+## Health and Readiness
+
+The basic health endpoint confirms the API process is running:
+
+```bash
+curl http://localhost:8000/health
+```
+
+The readiness endpoint checks database, Redis, and object storage availability without exposing credentials or object keys:
+
+```bash
+curl http://localhost:8000/ready
+```
+
+A `not_ready` response means one or more local dependencies need attention. Check service state and logs before rerunning large uploads or analysis jobs.
+
+## Stale Upload Cleanup
+
+Browser chunked uploads use temporary disk space before the completed evidence file is uploaded to MinIO/S3. If the browser, backend, Docker, or WSL shuts down mid-upload, expired upload sessions can remain in the configured temp directory.
+
+Run cleanup from the repository root:
+
+```bash
+python scripts/cleanup_stale_upload_sessions.py
+```
+
+The script removes only expired UUID-named upload session directories under `EVIDENCE_UPLOAD_TEMP_DIR` and prints aggregate counts. It does not remove registered evidence records, MinIO objects, reports, IOC exports, or raw Volatility outputs.
+
+## Large Evidence Disk and Memory Notes
+
+Large memory dumps require temporary upload space plus object storage space. A 6 GiB memory image can temporarily need about 6 GiB in the upload temp directory and additional MinIO storage after completion.
+
+On WSL/Docker Desktop, monitor disk and memory pressure during upload and analysis. If uploads stall or containers become unhealthy, inspect resource usage before retrying.
+
+## Troubleshooting Commands
+
+```bash
+docker compose -f docker-compose.dev.yml logs backend --tail=100
+docker compose -f docker-compose.dev.yml logs worker --tail=100
+docker compose -f docker-compose.dev.yml logs minio --tail=100
+docker compose -f docker-compose.dev.yml logs redis --tail=100
+```
+
+Confirm no memory dump files are tracked by Git:
+
+```bash
+git ls-files | grep -Ei '\.(raw|mem|dmp|vmem|lime|aff4)$' || true
+```
+
+Generated report and IOC export files should also stay out of Git:
+
+```bash
+git ls-files | grep -Ei '(technical_report|ioc_export|report).*\.(html|json|csv)$' || true
+```
+
+## Safety Reminders
+
+- Do not commit memory dumps or real evidence files.
+- Do not store memory dump bytes in PostgreSQL.
+- Do not expose MinIO credentials to the frontend.
+- Keep analysis offline and based on acquired memory images.

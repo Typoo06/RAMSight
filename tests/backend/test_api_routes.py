@@ -7,6 +7,7 @@ def test_expected_routes_are_registered() -> None:
     routes = {route.path for route in app.routes}
 
     assert "/health" in routes
+    assert "/ready" in routes
     assert "/api/v1/cases" in routes
     assert "/api/v1/cases/{case_id}" in routes
     assert "/api/v1/evidences" in routes
