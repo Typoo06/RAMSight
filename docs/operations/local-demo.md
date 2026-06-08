@@ -4,12 +4,6 @@ RAMSight is currently intended for local university-project validation and demo 
 
 ## Start Services
 
-Build and start the local stack:
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
-
 Start already-built services in the background:
 
 ```bash
@@ -66,19 +60,19 @@ A `not_ready` response means one or more local dependencies need attention. Chec
 Run the lightweight preflight before a local demo or thesis presentation. It checks backend health, backend readiness, the frontend URL, and whether Git is tracking memory-dump-like files. It does not upload evidence, download reports, or run a Volatility analysis job.
 
 ```bash
-python scripts/demo/preflight_check.py
+python scripts/demo/preflight_check.py --api-base http://localhost:8000/api/v1 --frontend-url http://localhost:5173
 ```
 
 To include a completed analysis job summary without downloading generated files:
 
 ```bash
-python scripts/demo/preflight_check.py --job-id <analysis-job-id>
+python scripts/demo/preflight_check.py --api-base http://localhost:8000/api/v1 --frontend-url http://localhost:5173 --job-id <analysis-job-id>
 ```
 
 For machine-readable output:
 
 ```bash
-python scripts/demo/preflight_check.py --json
+python scripts/demo/preflight_check.py --api-base http://localhost:8000/api/v1 --frontend-url http://localhost:5173 --json
 ```
 
 Use `--strict` with `--job-id` when optional job result endpoints should fail the preflight instead of producing warnings. A passing preflight means the local demo surface is reachable and basic dependencies are ready; it does not prove that a new large memory analysis will complete.
@@ -100,6 +94,33 @@ The script removes only expired UUID-named upload session directories under `EVI
 Large memory dumps require temporary upload space plus object storage space. A 6 GiB memory image can temporarily need about 6 GiB in the upload temp directory and additional MinIO storage after completion.
 
 On WSL/Docker Desktop, monitor disk and memory pressure during upload and analysis. If uploads stall or containers become unhealthy, inspect resource usage before retrying.
+
+
+## Test and Build Commands
+
+Backend tests:
+
+```bash
+docker compose -f docker-compose.dev.yml exec backend pytest /tests/backend
+```
+
+Worker tests:
+
+```bash
+docker compose -f docker-compose.dev.yml exec worker pytest /tests/worker
+```
+
+Frontend build:
+
+```bash
+docker compose -f docker-compose.dev.yml exec frontend npm run build
+```
+
+Frontend lint, if a lint script exists:
+
+```bash
+docker compose -f docker-compose.dev.yml exec frontend sh -lc "npm run | grep -q '^  lint' && npm run lint || echo 'No lint script; skipping lint'"
+```
 
 ## Troubleshooting Commands
 

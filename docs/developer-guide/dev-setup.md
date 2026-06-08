@@ -32,10 +32,11 @@ Prefer the existing VS Code tasks when available:
 Equivalent shell commands:
 
 ```powershell
-docker compose -f docker-compose.dev.yml up --build
+docker compose -f docker-compose.dev.yml up -d postgres redis minio backend worker frontend
+docker compose -f docker-compose.dev.yml exec backend pytest /tests/backend
+docker compose -f docker-compose.dev.yml exec worker pytest /tests/worker
+docker compose -f docker-compose.dev.yml exec frontend npm run build
 docker compose -f docker-compose.dev.yml down
-cd backend && pytest
-cd frontend && npm run lint
 ```
 
 To validate Compose syntax without starting services:
