@@ -35,6 +35,8 @@ Check local readiness:
 python scripts/demo/preflight_check.py --api-base http://localhost:8000/api/v1 --frontend-url http://localhost:5173
 ```
 
+For the memory-only malware defense demo, use the `windows_memory_yara` analysis profile when starting a Windows memory job. It runs the standard Volatility triage plugins plus process-memory YARA scanning. The faster `windows_default` profile is still available when YARA scan time is not acceptable.
+
 Run a strict preflight against the known local demo job, if that job exists in your database:
 
 ```bash
@@ -75,6 +77,7 @@ Start here for local demo and submission workflows:
 - [Local demo operations](docs/operations/local-demo.md)
 - [Local demo and thesis defense runbook](docs/demo/local-defense-runbook.md)
 - [Large evidence browser upload notes](docs/validation/large-evidence-browser-upload.md)
+- [YARA rule guide](docs/YARA_RULES.md)
 - [Developer setup](docs/developer-guide/dev-setup.md)
 
 ## Safety Rules
@@ -85,6 +88,9 @@ Start here for local demo and submission workflows:
 - Store evidence, raw outputs, parsed outputs, reports, and IOC exports in MinIO/S3.
 - Store only metadata, normalized artifacts, findings, IOCs, reports metadata, and analyst review metadata in PostgreSQL.
 - Keep secrets out of Git. Use `.env.example` only for local-development placeholders.
+- Use browser chunked upload for large memory dumps. The direct multipart upload endpoint is capped for demo safety.
+- PDF export is not implemented in the current demo build; use the generated technical HTML report and IOC JSON/CSV exports.
+- This project is lab/demo-ready, not production-ready. It intentionally does not include full production auth/RBAC, TLS, backup, or secret-manager integration.
 
 Safety checks before committing:
 

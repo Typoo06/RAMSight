@@ -128,6 +128,44 @@ def test_initiate_upload_session_creates_manifest(client_context) -> None:
     assert (upload_root / payload["upload_id"] / "evidence.tmp").is_file()
 
 
+def test_direct_upload_rejects_oversized_file_before_storage_upload(client_context, monkeypatch) -> None:
+    monkeypatch.setenv("EVIDENCE_DIRECT_UPLOAD_MAX_BYTES", "4")
+    get_settings.cache_clear()
+    client, session_factory, fake_storage, _ = client_context
+    case = seed_case(session_factory)
+
+    response = client.post(
+        "/api/v1/evidences/upload",
+        data={"case_id": str(case.id), "os_family": "windows"},
+        files={"file": ("memory.raw", b"abcde", "application/octet-stream")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "direct evidence upload exceeds maximum size; use browser chunked upload for large memory dumps"
+    )
+    assert fake_storage.uploads == []
+
+
+def test_register_rejects_local_path_for_demo_workflow(client_context) -> None:
+    client, session_factory, _, _ = client_context
+    case = seed_case(session_factory)
+
+    response = client.post(
+        "/api/v1/evidences/register",
+        json={
+            "case_id": str(case.id),
+            "source_type": "local_path",
+            "original_filename": "memory.raw",
+            "local_path": "/mnt/lab/memory.raw",
+            "os_family": "windows",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "local_path evidence registration is disabled for the demo workflow; use upload or minio_object"
+
+
 def test_initiate_rejects_unsafe_extension(client_context) -> None:
     client, session_factory, _, _ = client_context
     case = seed_case(session_factory)

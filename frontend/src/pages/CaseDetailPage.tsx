@@ -10,21 +10,21 @@ import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Table } from "../components/ui/Table";
 import type { AnalysisJob, AnalysisPluginProfile, Case, Evidence } from "../types/domain";
-import { displayValue, formatBytes, formatDateTime, shortHash } from "../utils/format";
+import { displayValue, formatBytes, formatDateTime, formatDurationMs, shortHash } from "../utils/format";
 import { statusTone } from "../utils/status";
 
-const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_default";
+const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_memory_yara";
 
 const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; value: AnalysisPluginProfile }> = [
   {
     value: "windows_default",
     label: "Standard Windows triage",
-    description: "Fast default RAMSight analysis without YARA scanning.",
+    description: "Fast default RAMSight analysis without YARA process-memory scanning.",
   },
   {
     value: "windows_memory_yara",
-    label: "Windows memory + YARA triage",
-    description: "Runs memory triage plus YARA process-memory scanning when rules are available.",
+    label: "Memory-only demo + YARA",
+    description: "Recommended for thesis demos: standard Windows triage plus YARA process-memory scanning when rules are available.",
   },
 ];
 
@@ -174,7 +174,8 @@ export function CaseDetailPage() {
           <p>{caseRecord.description || "No case description has been recorded."}</p>
         </Card>
         <Card title="Workflow" actions={<Link className="text-link" to="/cases">Back to cases</Link>}>
-          <p>Upload memory evidence, start a queued worker analysis, then monitor the job until RAMSight reaches a terminal status.</p>
+          <p>Upload memory evidence, choose an analysis profile, then monitor the worker job until RAMSight reaches a terminal status.</p>
+          <p className="section-note">Large browser uploads use chunked transfer. RAMSight stores memory dump bytes in object storage and keeps metadata, hashes, and normalized records in PostgreSQL.</p>
           <Link className="text-link" to={`/cases/${caseId}/evidence/upload`}>
             Upload evidence
           </Link>
@@ -184,10 +185,11 @@ export function CaseDetailPage() {
       {startError && <ErrorState message={startError} title="Analysis job could not be created" />}
 
       <Card title="Evidence" actions={<Link className="text-link" to={`/cases/${caseId}/evidence/upload`}>Upload evidence</Link>}>
+        <p className="section-note">Evidence rows show stored metadata only. RAMSight does not keep memory dump contents in React state or PostgreSQL.</p>
         {evidenceLoading && <LoadingState label="Loading RAMSight evidence metadata..." />}
         {evidenceError && <ErrorState message={evidenceError} title="Evidence metadata unavailable" />}
         {!evidenceLoading && !evidenceError && evidences.length === 0 && (
-          <p className="muted">No evidence has been uploaded for this case yet.</p>
+          <p className="muted">No evidence has been uploaded for this case yet. Upload a memory image to begin RAMSight triage.</p>
         )}
         {!evidenceLoading && !evidenceError && evidences.length > 0 && (
           <div className="item-list">
@@ -276,10 +278,10 @@ export function CaseDetailPage() {
                   <td>{displayValue(job.os_family)}</td>
                   <td>{profileLabel(job.plugin_profile)}</td>
                   <td>{formatDateTime(job.updated_at)}</td>
-                  <td>{job.duration_ms === null ? "Not recorded" : `${job.duration_ms} ms`}</td>
+                  <td>{formatDurationMs(job.duration_ms)}</td>
                   <td>
                     <Link className="text-link" to={`/cases/${caseId}/jobs/${job.id}`}>
-                      View status
+                      View results
                     </Link>
                   </td>
                 </tr>

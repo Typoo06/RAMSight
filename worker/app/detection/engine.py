@@ -53,6 +53,48 @@ YARA_SEVERITY_SCORES = {
     "critical": 13,
 }
 DEMO_YARA_RULE_METADATA = {
+    "ramsight_memory_powershell_encodedcommand_context": {
+        "triage_severity": "medium",
+        "confidence": "candidate",
+        "noisy": False,
+        "requires_correlation": True,
+    },
+    "ramsight_memory_powershell_downloadcradle_context": {
+        "triage_severity": "medium",
+        "confidence": "candidate",
+        "noisy": False,
+        "requires_correlation": True,
+    },
+    "ramsight_memory_processinjection_api_cluster": {
+        "triage_severity": "high",
+        "confidence": "candidate",
+        "noisy": False,
+        "requires_correlation": True,
+    },
+    "ramsight_memory_reflectiveloading_importcluster": {
+        "triage_severity": "medium",
+        "confidence": "candidate",
+        "noisy": True,
+        "requires_correlation": True,
+    },
+    "ramsight_memory_credentialdumping_context": {
+        "triage_severity": "high",
+        "confidence": "candidate",
+        "noisy": False,
+        "requires_correlation": True,
+    },
+    "ramsight_memory_livingoffland_command_context": {
+        "triage_severity": "medium",
+        "confidence": "candidate",
+        "noisy": False,
+        "requires_correlation": True,
+    },
+    "ramsight_memory_packedobfuscated_pe_context": {
+        "triage_severity": "low",
+        "confidence": "candidate",
+        "noisy": True,
+        "requires_correlation": True,
+    },
     "ramsight_demo_pe_header_in_memory_candidate": {
         "triage_severity": "low",
         "confidence": "candidate",

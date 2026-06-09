@@ -96,9 +96,13 @@ A passing preflight means the demo surface is reachable, dependencies are ready,
 
 2. Show the case and evidence metadata. Point out OS metadata, file size, MD5/SHA256 hashes, and that PostgreSQL stores metadata rather than dump bytes.
 
-3. Open the completed attack2 analysis job. Use the known-good job if the goal is presentation stability instead of rerunning a large analysis.
+3. Upload or register a lab memory dump. For large memory dumps, use the browser chunked upload workflow rather than the direct multipart upload endpoint.
 
-4. Show plugin results. Explain the role of the main Windows plugins:
+4. Start analysis with the `windows_memory_yara` profile. This is the recommended memory-only malware demo path because it includes process-memory YARA scanning in addition to the standard Windows Volatility triage plugins.
+
+5. Open the completed attack2 analysis job. Use the known-good job if the goal is presentation stability instead of rerunning a large analysis.
+
+6. Show plugin results. Explain the role of the main Windows plugins:
 
    - `windows.pslist`: active process list
    - `windows.psscan`: process scan for hidden or unlinked process candidates
@@ -110,14 +114,16 @@ A passing preflight means the demo surface is reachable, dependencies are ready,
    - `windows.malfind`: suspicious memory-region evidence
    - `windows.vadyarascan`: YARA scan over process memory regions
 
-5. Explain memory-only evidence. Focus on:
+7. Explain suspicious findings and memory-only evidence. Focus on:
 
    - executable memory regions from `malfind`
    - process-centered risk summaries
    - YARA process-memory matches as triage support
    - IOC records derived from normalized artifacts and findings
 
-6. Open the technical report. Emphasize the report sections:
+8. Review IOC records and export IOC JSON/CSV if useful.
+
+9. Open the technical HTML report. PDF export is not implemented in the current demo build. Emphasize the report sections:
 
    - Executive Summary
    - Plugin Results
@@ -127,12 +133,7 @@ A passing preflight means the demo surface is reachable, dependencies are ready,
    - YARA Matches
    - Raw and parsed output references
 
-7. Demonstrate IOC export downloads if useful:
-
-   - Download IOC JSON
-   - Download IOC CSV
-
-8. Show analyst review workflow if relevant. Keep the message cautious: review status and notes help organize triage, but they do not replace expert analysis.
+10. Show analyst review workflow if relevant. Keep the message cautious: review status and notes help organize triage, but they do not replace expert analysis.
 
 ## 6. Thesis Defense Talking Points
 

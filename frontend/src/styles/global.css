@@ -38,6 +38,9 @@ a { color: inherit; }
 .card h2 { margin: 0; font-size: 16px; }
 .card p { margin-top: 0; }
 .metric-value { font-size: 28px; font-weight: 800; margin: 0 0 4px; }
+.readiness-panel { display: grid; gap: 8px; margin-bottom: 12px; }
+.readiness-row { align-items: center; border-bottom: 1px solid #e6ebef; display: flex; justify-content: space-between; gap: 12px; padding-bottom: 8px; text-transform: capitalize; }
+.dashboard-attention-list dd { font-size: 20px; font-weight: 800; }
 .button { border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-weight: 700; padding: 9px 12px; }
 .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .button-small { display: inline-flex; font-size: 13px; padding: 7px 9px; text-decoration: none; white-space: nowrap; }
@@ -62,8 +65,33 @@ a { color: inherit; }
 .table caption { color: #63717d; margin-bottom: 8px; text-align: left; }
 .table th, .table td { border-bottom: 1px solid #e2e8ed; padding: 10px; text-align: left; vertical-align: top; }
 .table th { color: #4d5d68; font-size: 12px; text-transform: uppercase; }
+
+.table-block { display: grid; gap: 8px; }
+.table-note { color: #63717d; font-size: 13px; margin: 0; }
+.table-cell-title { display: block; }
+.long-text { max-width: 360px; overflow-wrap: anywhere; }
+.code-value { display: inline-block; max-width: min(100%, 56ch); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
+.error-summary { max-width: 340px; }
+.recommendation-cell { min-width: 220px; }
+.status-callout-info { border-color: #afd4ec; background: #f5fbff; }
+.metric-value-text { font-size: 24px; line-height: 1.15; }
 .table-subtext { color: #63717d; display: block; font-size: 13px; margin-top: 4px; }
 .table-context { color: #2f5d68; overflow-wrap: anywhere; }
+.evidence-graph { display: grid; gap: 12px; }
+.evidence-graph-row { align-items: stretch; background: #f8fbfc; border: 1px solid #dce5eb; border-radius: 8px; display: grid; gap: 12px; grid-template-columns: minmax(220px, 280px) 28px 1fr; padding: 12px; }
+.evidence-process-node { background: #ffffff; border: 1px solid #dce3e8; border-radius: 8px; display: grid; gap: 7px; min-width: 0; padding: 12px; }
+.evidence-process-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-process-heading { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.evidence-process-heading span:last-child { color: #63717d; font-size: 13px; font-weight: 700; }
+.evidence-relationship-connector { align-self: center; border-top: 2px solid #a7beca; position: relative; }
+.evidence-relationship-connector::after { border-bottom: 5px solid transparent; border-left: 7px solid #a7beca; border-top: 5px solid transparent; content: ""; position: absolute; right: -1px; top: -6px; }
+.evidence-signal-grid { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); min-width: 0; }
+.evidence-signal-card { background: #ffffff; border: 1px solid #dce3e8; border-radius: 8px; display: grid; gap: 8px; min-width: 0; padding: 10px; }
+.evidence-signal-header { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.evidence-signal-header span { color: #4d5d68; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+.evidence-signal-header strong { color: #18232d; font-size: 18px; }
+.evidence-chip-list { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.evidence-chip { background: #eef5f7; border: 1px solid #cfdee5; border-radius: 999px; color: #2f5d68; display: inline-block; font-size: 12px; max-width: 100%; overflow: hidden; padding: 4px 7px; text-overflow: ellipsis; white-space: nowrap; }
 .state { background: #ffffff; border: 1px solid #dce3e8; border-radius: 8px; padding: 16px; }
 .state-error { border-color: #f0b8b2; color: #7b1f16; display: grid; gap: 4px; }
 .state-loading { color: #4d5d68; }
@@ -115,6 +143,8 @@ code { overflow-wrap: anywhere; }
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; }
   .dashboard-grid, .detail-grid { grid-template-columns: 1fr; }
+  .evidence-graph-row, .evidence-signal-grid { grid-template-columns: 1fr; }
+  .evidence-relationship-connector { display: none; }
   .filter-row, .form-grid-two, .metadata-list-wide, .review-grid { grid-template-columns: 1fr; }
   .item-panel-header { align-items: stretch; flex-direction: column; }
   .topbar { align-items: flex-start; height: auto; padding: 18px; flex-direction: column; }

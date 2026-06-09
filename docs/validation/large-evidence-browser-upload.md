@@ -2,15 +2,18 @@
 
 RAMSight uses browser chunked upload for large memory dumps. The frontend slices the selected file with `File.slice()` and sends one chunk at a time to the backend upload-session API. The backend writes chunks to a temporary session file, hashes the completed file from disk, uploads it to MinIO/S3, and stores only metadata in PostgreSQL.
 
+The direct multipart upload endpoint is intentionally capped for demo safety. Use chunked upload for memory dumps and reserve direct upload for small validation files only.
+
 ## Configuration
 
 Development defaults are documented in `.env.example`:
 
 ```text
 EVIDENCE_UPLOAD_TEMP_DIR=/tmp/ramsight-evidence-uploads
-EVIDENCE_UPLOAD_CHUNK_SIZE_BYTES=16777216
+EVIDENCE_UPLOAD_CHUNK_SIZE_BYTES=4194304
 EVIDENCE_UPLOAD_SESSION_TTL_SECONDS=86400
 EVIDENCE_MAX_UPLOAD_BYTES=21474836480
+EVIDENCE_DIRECT_UPLOAD_MAX_BYTES=268435456
 ```
 
 The default chunk size is 16 MiB. Browser upload temporarily needs disk space roughly equal to the evidence size before the file is copied into MinIO/S3. A 6 GiB memory image can require about 6 GiB of temporary upload space plus MinIO object storage.

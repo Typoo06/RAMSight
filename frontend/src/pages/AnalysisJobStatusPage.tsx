@@ -16,6 +16,7 @@ import { listRiskFindings } from "../api/riskFindings";
 import { ArtifactDrilldown, MemoryRegionTable, YaraMatchTable } from "../components/results/ArtifactDrilldown";
 import { FindingTable } from "../components/results/FindingTable";
 import { IocTable } from "../components/results/IocTable";
+import { MemoryEvidenceGraph } from "../components/results/MemoryEvidenceGraph";
 import { PluginResultTable } from "../components/results/PluginResultTable";
 import { ReportSection } from "../components/results/ReportSection";
 import { ResultSection } from "../components/results/ResultSection";
@@ -36,7 +37,7 @@ import type {
   RiskFinding,
   YaraMatchArtifact,
 } from "../types/domain";
-import { displayValue, formatDateTime } from "../utils/format";
+import { displayValue, formatDateTime, formatDurationMs } from "../utils/format";
 import {
   isMemoryRegionFinding,
   isMemoryRegionIOC,
@@ -67,6 +68,17 @@ function terminalResultEmptyMessage(jobStatus: string, completedMessage: string)
 }
 
 const YARA_PLUGIN_NAMES = new Set(["windows.vadyarascan", "yarascan", "linux.vmayarascan"]);
+
+const PROFILE_LABELS: Record<string, string> = {
+  windows_default: "Standard Windows triage",
+  windows_memory_yara: "Windows memory + YARA triage",
+};
+
+function analysisProfileLabel(profile: string | null | undefined): string {
+  const normalized = normalizedPluginProfile(profile);
+  if (!normalized) return "No profile recorded";
+  return PROFILE_LABELS[normalized] ?? profile ?? "No profile recorded";
+}
 
 function normalizedPluginProfile(profile: string | null | undefined): string | null {
   const normalized = (profile ?? "").trim().toLowerCase();
@@ -101,19 +113,19 @@ function yaraStatusMessage(job: AnalysisJob, pluginResults: PluginResult[], hasY
   if (timedOut) {
     const timeout = timeoutSeconds(timedOut);
     return timeout === null
-      ? `YARA scanning was selected but ${pluginResultName(timedOut)} timed out.`
-      : `YARA scanning was selected but ${pluginResultName(timedOut)} timed out after ${timeout} seconds.`;
+      ? `YARA scanning was selected, but ${pluginResultName(timedOut)} timed out. Other completed plugin results remain available for triage.`
+      : `YARA scanning was selected, but ${pluginResultName(timedOut)} timed out after ${timeout} seconds. Other completed plugin results remain available for triage.`;
   }
 
   const failed = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "failed");
-  if (failed) return `YARA scanning was selected but ${pluginResultName(failed)} failed: ${failed.error_message || "No detailed error was recorded."}`;
+  if (failed) return `YARA scanning was selected, but ${pluginResultName(failed)} failed. ${failed.error_message || "No detailed error was recorded."}`;
 
   const skipped = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "skipped");
-  if (skipped) return `YARA scanning was selected but ${pluginResultName(skipped)} was skipped: ${skipped.error_message || "No detailed skip reason was recorded."}`;
+  if (skipped) return `YARA scanning was selected, but ${pluginResultName(skipped)} was skipped. ${skipped.error_message || "No detailed skip reason was recorded."}`;
 
   const completed = yaraPluginResults.find((pluginResult) => pluginResult.status.toLowerCase() === "completed");
   if (completed && hasYaraResults) return "YARA scanning completed and YARA-related results are available below.";
-  if (completed) return "YARA scanning completed; no YARA match artifacts or YARA IOC records were recorded.";
+  if (completed) return "YARA scanning completed; no YARA match artifacts or YARA IOC records were recorded. This is a triage result, not a guarantee that process memory is clean.";
 
   const pluginProfile = normalizedPluginProfile(job.plugin_profile);
   if (!pluginProfile) return "No YARA profile was recorded for this job.";
@@ -414,6 +426,18 @@ export function AnalysisJobStatusPage() {
     [commandArtifacts, findings, memoryRegions, moduleArtifacts, networkArtifacts, processArtifacts, yaraMatches],
   );
   const focusedArtifactCount = processArtifacts.length + commandArtifacts.length + networkArtifacts.length + moduleArtifacts.length + memoryRegions.length + yaraMatches.length;
+  const completedPluginCount = pluginResults.filter((pluginResult) => pluginResult.status.toLowerCase() === "completed").length;
+  const failedPluginCount = pluginResults.filter((pluginResult) => pluginResult.status.toLowerCase() === "failed").length;
+  const pluginSummaryValue = pluginResults.length === 0 ? "Pending" : `${completedPluginCount}/${pluginResults.length}`;
+  const pluginSummaryDetail = pluginResults.length === 0
+    ? "Plugin metadata has not loaded yet"
+    : failedPluginCount === 0
+      ? "Completed plugins"
+      : `${failedPluginCount} plugin issue${failedPluginCount === 1 ? "" : "s"} recorded`;
+  const reportSummaryDetail = reports.length === 0 ? "No HTML report metadata yet" : "HTML report metadata available";
+  const relationshipInputWarning = findingError || iocError || drilldownSectionError
+    ? "Some relationship inputs are unavailable. RAMSight is showing loaded metadata only."
+    : null;
   const iocExportActions = job ? (
     <div className="button-row">
       <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "json")}>Download IOC JSON</a>
@@ -442,8 +466,8 @@ export function AnalysisJobStatusPage() {
       <div className="detail-grid">
         <Card title="Job timeline">
           <dl className="metadata-list">
-            <div><dt>Status</dt><dd>{job.status}</dd></div>
-            <div><dt>Duration</dt><dd>{job.duration_ms === null ? "Not recorded" : `${job.duration_ms} ms`}</dd></div>
+            <div><dt>Status</dt><dd><Badge tone={statusTone(job.status)}>{job.status}</Badge></dd></div>
+            <div><dt>Duration</dt><dd>{formatDurationMs(job.duration_ms)}</dd></div>
             <div><dt>Created</dt><dd>{formatDateTime(job.created_at)}</dd></div>
             <div><dt>Updated</dt><dd>{formatDateTime(job.updated_at)}</dd></div>
             <div><dt>Started</dt><dd>{formatDateTime(job.started_at)}</dd></div>
@@ -459,7 +483,7 @@ export function AnalysisJobStatusPage() {
             <div><dt>Architecture</dt><dd>{displayValue(job.architecture)}</dd></div>
             <div><dt>Kernel version</dt><dd>{displayValue(job.kernel_version)}</dd></div>
             <div><dt>Symbol table</dt><dd>{displayValue(job.symbol_table)}</dd></div>
-            <div><dt>Plugin profile</dt><dd>{displayValue(job.plugin_profile)}</dd></div>
+            <div><dt>Plugin profile</dt><dd><strong>{analysisProfileLabel(job.plugin_profile)}</strong><span className="table-subtext">{displayValue(job.plugin_profile)}</span></dd></div>
           </dl>
         </Card>
       </div>
@@ -472,9 +496,20 @@ export function AnalysisJobStatusPage() {
       )}
 
       <div className="dashboard-grid">
-        <Card title="Findings"><p className="metric-value">{findings.length}</p><p className="muted">Total RAMSight findings</p></Card>
+        <Card title="Findings"><p className="metric-value">{findings.length}</p><p className="muted">Triage findings recorded</p></Card>
         <Card title="High priority"><p className="metric-value">{highPriorityFindings.length}</p><p className="muted">High or critical findings</p></Card>
         <Card title="Indicators"><p className="metric-value">{iocs.length}</p><p className="muted">Extracted IOC records</p></Card>
+        <Card title="Plugin completion"><p className="metric-value metric-value-text">{pluginSummaryValue}</p><p className="muted">{pluginSummaryDetail}</p></Card>
+        <Card title="Reports"><p className="metric-value">{reports.length}</p><p className="muted">{reportSummaryDetail}</p></Card>
+      </div>
+
+      <div className="detail-grid">
+        <Card className="status-callout status-callout-info" title="YARA status">
+          <p>{yaraMessage}</p>
+        </Card>
+        <Card className="status-callout" title="Analyst review note">
+          <p>RAMSight findings are triage indicators. They support investigation and require analyst review before any conclusion is made.</p>
+        </Card>
       </div>
 
       <Card title="Finding review filter">
@@ -497,7 +532,7 @@ export function AnalysisJobStatusPage() {
         loading={findingLoading}
         error={findingError}
         empty={sortedFindings.length === 0}
-        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no risk findings recorded.")}
+        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no risk findings recorded through the current APIs.")}
       >
         <FindingTable caption="Critical and high findings are shown first" findings={sortedFindings} limit={20} onFindingUpdated={handleFindingUpdated} />
       </ResultSection>
@@ -510,6 +545,25 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No process risk summary findings are available for this job.")}
       >
         <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={20} onFindingUpdated={handleFindingUpdated} />
+      </ResultSection>
+
+      <ResultSection
+        title="Memory-only Evidence Relationships"
+        loading={findingLoading || iocLoading || drilldownSectionLoading}
+        empty={false}
+      >
+        <div className="page-stack compact-stack">
+          {relationshipInputWarning && <p className="table-note">{relationshipInputWarning}</p>}
+          <MemoryEvidenceGraph
+            findings={sortedFindings}
+            focusPid={focusPidInvalid ? null : focusPid}
+            iocs={iocs}
+            memoryRegions={memoryRegions}
+            networkArtifacts={networkArtifacts}
+            processArtifacts={processArtifacts}
+            yaraMatches={yaraMatches}
+          />
+        </div>
       </ResultSection>
 
       <ResultSection
@@ -611,7 +665,7 @@ export function AnalysisJobStatusPage() {
         loading={drilldownSectionLoading}
         error={drilldownSectionError}
         empty={yaraMatches.length === 0}
-        emptyMessage={terminalResultEmptyMessage(job.status, "No YARA matches were parsed for this job.")}
+        emptyMessage={terminalResultEmptyMessage(job.status, "No YARA match artifacts are available for this job. Check the YARA status message above before treating this as a clean no-match result.")}
       >
         <YaraMatchTable caption={focusPid === null ? "YARA match artifacts" : `YARA match artifacts for PID ${focusPid}`} yaraMatches={yaraMatches} limit={50} />
       </ResultSection>

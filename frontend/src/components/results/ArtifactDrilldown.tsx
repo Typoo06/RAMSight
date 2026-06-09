@@ -52,39 +52,47 @@ function offsetText(offset: number | string | null): string {
   return typeof offset === "number" ? `0x${offset.toString(16)}` : offset;
 }
 
+function CappedNote({ limit, total }: { limit: number; total: number }) {
+  if (total <= limit) return null;
+  return <p className="table-note">Showing {limit} of {total} normalized artifact rows. Use Focus PID or backend APIs for the full stored set.</p>;
+}
+
 export function MemoryRegionTable({ caption, memoryRegions, limit = 50 }: MemoryRegionTableProps) {
   const visibleRegions = memoryRegions.slice(0, limit);
 
   return (
-    <Table caption={caption}>
-      <thead>
-        <tr>
-          <th>PID</th>
-          <th>Process</th>
-          <th>Address range</th>
-          <th>Protection</th>
-          <th>Executable</th>
-          <th>Source plugin</th>
-          <th>Excerpt</th>
-        </tr>
-      </thead>
-      <tbody>
-        {visibleRegions.map((region) => (
-          <tr key={region.id}>
-            <td>{displayValue(region.pid)}</td>
-            <td>{displayValue(region.process_name)}</td>
-            <td><code>{addressRange(region)}</code></td>
-            <td>{displayValue(region.protection)}</td>
-            <td>{region.is_executable ? "Yes" : "No"}</td>
-            <td>{displayValue(region.source_plugin)}</td>
-            <td>
-              <span className="table-subtext">Hex: {truncateText(region.hexdump_excerpt)}</span>
-              <span className="table-subtext">Disasm: {truncateText(region.disassembly_excerpt)}</span>
-            </td>
+    <div className="table-block">
+      <Table caption={caption}>
+        <thead>
+          <tr>
+            <th>PID</th>
+            <th>Process</th>
+            <th>Address range</th>
+            <th>Protection</th>
+            <th>Executable</th>
+            <th>Source plugin</th>
+            <th>Excerpt</th>
           </tr>
-        ))}
-      </tbody>
-    </Table>
+        </thead>
+        <tbody>
+          {visibleRegions.map((region) => (
+            <tr key={region.id}>
+              <td>{displayValue(region.pid)}</td>
+              <td>{displayValue(region.process_name)}</td>
+              <td className="long-text"><code className="code-value">{addressRange(region)}</code></td>
+              <td>{displayValue(region.protection)}</td>
+              <td>{region.is_executable ? "Yes" : "No"}</td>
+              <td className="long-text">{displayValue(region.source_plugin)}</td>
+              <td className="long-text">
+                <span className="table-subtext">Hex: {truncateText(region.hexdump_excerpt)}</span>
+                <span className="table-subtext">Disasm: {truncateText(region.disassembly_excerpt)}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+      <CappedNote limit={visibleRegions.length} total={memoryRegions.length} />
+    </div>
   );
 }
 
@@ -92,30 +100,33 @@ export function YaraMatchTable({ caption, yaraMatches, limit = 50 }: YaraMatchTa
   const visibleMatches = yaraMatches.slice(0, limit);
 
   return (
-    <Table caption={caption}>
-      <thead>
-        <tr>
-          <th>Rule</th>
-          <th>Target</th>
-          <th>Offset</th>
-          <th>Namespace</th>
-          <th>Source plugin</th>
-          <th>Matched text</th>
-        </tr>
-      </thead>
-      <tbody>
-        {visibleMatches.map((match) => (
-          <tr key={match.id}>
-            <td>{match.rule_name}</td>
-            <td>{displayValue(match.target_identifier)}</td>
-            <td><code>{offsetText(match.offset)}</code></td>
-            <td>{displayValue(match.namespace)}</td>
-            <td>{displayValue(match.source_plugin)}</td>
-            <td>{truncateText(match.matched_text_excerpt)}</td>
+    <div className="table-block">
+      <Table caption={caption}>
+        <thead>
+          <tr>
+            <th>Rule</th>
+            <th>Target</th>
+            <th>Offset</th>
+            <th>Namespace</th>
+            <th>Source plugin</th>
+            <th>Matched text</th>
           </tr>
-        ))}
-      </tbody>
-    </Table>
+        </thead>
+        <tbody>
+          {visibleMatches.map((match) => (
+            <tr key={match.id}>
+              <td className="long-text">{match.rule_name}</td>
+              <td className="long-text">{displayValue(match.target_identifier)}</td>
+              <td className="long-text"><code className="code-value">{offsetText(match.offset)}</code></td>
+              <td>{displayValue(match.namespace)}</td>
+              <td className="long-text">{displayValue(match.source_plugin)}</td>
+              <td className="long-text">{truncateText(match.matched_text_excerpt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+      <CappedNote limit={visibleMatches.length} total={yaraMatches.length} />
+    </div>
   );
 }
 
@@ -128,92 +139,106 @@ export function ArtifactDrilldown({
   processArtifacts,
   yaraMatches,
 }: ArtifactDrilldownProps) {
+  const focusedLimit = 20;
+
   return (
     <div className="page-stack compact-stack">
       <p className="section-note">
         {focusPid === null
-          ? "Enter a PID to focus the artifact view on one process."
-          : `Focused process evidence for PID ${focusPid}.`}
+          ? "Enter a PID to focus the artifact view on one process. RAMSight shows normalized metadata only."
+          : `Focused process evidence for PID ${focusPid}. Values are stored artifacts and require analyst review.`}
       </p>
 
       {processArtifacts.length > 0 && (
-        <Table caption="Process artifacts">
-          <thead>
-            <tr><th>PID</th><th>PPID</th><th>Name</th><th>Image path</th><th>Source plugin</th></tr>
-          </thead>
-          <tbody>
-            {processArtifacts.slice(0, 20).map((process) => (
-              <tr key={process.id}>
-                <td>{displayValue(process.pid)}</td>
-                <td>{displayValue(process.ppid)}</td>
-                <td>{displayValue(process.name)}</td>
-                <td><code>{displayValue(process.image_path)}</code></td>
-                <td>{displayValue(process.source_plugin)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <div className="table-block">
+          <Table caption="Process artifacts">
+            <thead>
+              <tr><th>PID</th><th>PPID</th><th>Name</th><th>Image path</th><th>Source plugin</th></tr>
+            </thead>
+            <tbody>
+              {processArtifacts.slice(0, focusedLimit).map((process) => (
+                <tr key={process.id}>
+                  <td>{displayValue(process.pid)}</td>
+                  <td>{displayValue(process.ppid)}</td>
+                  <td>{displayValue(process.name)}</td>
+                  <td className="long-text"><code className="code-value">{displayValue(process.image_path)}</code></td>
+                  <td className="long-text">{displayValue(process.source_plugin)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <CappedNote limit={Math.min(processArtifacts.length, focusedLimit)} total={processArtifacts.length} />
+        </div>
       )}
 
       {commandArtifacts.length > 0 && (
-        <Table caption="Command artifacts">
-          <thead>
-            <tr><th>PID</th><th>Process</th><th>Command</th><th>Source plugin</th></tr>
-          </thead>
-          <tbody>
-            {commandArtifacts.slice(0, 20).map((command) => (
-              <tr key={command.id}>
-                <td>{displayValue(command.pid)}</td>
-                <td>{displayValue(command.process_name)}</td>
-                <td><code>{truncateText(command.command, 260)}</code></td>
-                <td>{displayValue(command.source_plugin)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <div className="table-block">
+          <Table caption="Command artifacts">
+            <thead>
+              <tr><th>PID</th><th>Process</th><th>Command</th><th>Source plugin</th></tr>
+            </thead>
+            <tbody>
+              {commandArtifacts.slice(0, focusedLimit).map((command) => (
+                <tr key={command.id}>
+                  <td>{displayValue(command.pid)}</td>
+                  <td>{displayValue(command.process_name)}</td>
+                  <td className="long-text"><code className="code-value">{truncateText(command.command, 260)}</code></td>
+                  <td className="long-text">{displayValue(command.source_plugin)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <CappedNote limit={Math.min(commandArtifacts.length, focusedLimit)} total={commandArtifacts.length} />
+        </div>
       )}
 
       {networkArtifacts.length > 0 && (
-        <Table caption="Network artifacts">
-          <thead>
-            <tr><th>PID</th><th>Process</th><th>Protocol</th><th>Endpoint</th><th>State</th><th>Source plugin</th></tr>
-          </thead>
-          <tbody>
-            {networkArtifacts.slice(0, 20).map((network) => (
-              <tr key={network.id}>
-                <td>{displayValue(network.pid)}</td>
-                <td>{displayValue(network.process_name)}</td>
-                <td>{displayValue(network.protocol)}</td>
-                <td><code>{endpoint(network)}</code></td>
-                <td>{displayValue(network.state)}</td>
-                <td>{displayValue(network.source_plugin)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <div className="table-block">
+          <Table caption="Network artifacts">
+            <thead>
+              <tr><th>PID</th><th>Process</th><th>Protocol</th><th>Endpoint</th><th>State</th><th>Source plugin</th></tr>
+            </thead>
+            <tbody>
+              {networkArtifacts.slice(0, focusedLimit).map((network) => (
+                <tr key={network.id}>
+                  <td>{displayValue(network.pid)}</td>
+                  <td>{displayValue(network.process_name)}</td>
+                  <td>{displayValue(network.protocol)}</td>
+                  <td className="long-text"><code className="code-value">{endpoint(network)}</code></td>
+                  <td>{displayValue(network.state)}</td>
+                  <td className="long-text">{displayValue(network.source_plugin)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <CappedNote limit={Math.min(networkArtifacts.length, focusedLimit)} total={networkArtifacts.length} />
+        </div>
       )}
 
       {moduleArtifacts.length > 0 && (
-        <Table caption="Module artifacts">
-          <thead>
-            <tr><th>PID</th><th>Process</th><th>Module</th><th>Path</th><th>Source plugin</th></tr>
-          </thead>
-          <tbody>
-            {moduleArtifacts.slice(0, 20).map((module) => (
-              <tr key={module.id}>
-                <td>{displayValue(module.pid)}</td>
-                <td>{displayValue(module.process_name)}</td>
-                <td>{displayValue(module.module_name)}</td>
-                <td><code>{displayValue(module.module_path)}</code></td>
-                <td>{displayValue(module.source_plugin)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <div className="table-block">
+          <Table caption="Module artifacts">
+            <thead>
+              <tr><th>PID</th><th>Process</th><th>Module</th><th>Path</th><th>Source plugin</th></tr>
+            </thead>
+            <tbody>
+              {moduleArtifacts.slice(0, focusedLimit).map((module) => (
+                <tr key={module.id}>
+                  <td>{displayValue(module.pid)}</td>
+                  <td>{displayValue(module.process_name)}</td>
+                  <td>{displayValue(module.module_name)}</td>
+                  <td className="long-text"><code className="code-value">{displayValue(module.module_path)}</code></td>
+                  <td className="long-text">{displayValue(module.source_plugin)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <CappedNote limit={Math.min(moduleArtifacts.length, focusedLimit)} total={moduleArtifacts.length} />
+        </div>
       )}
 
-      {memoryRegions.length > 0 && <MemoryRegionTable caption="Focused memory region artifacts" memoryRegions={memoryRegions} limit={20} />}
-      {yaraMatches.length > 0 && <YaraMatchTable caption="Focused YARA match artifacts" yaraMatches={yaraMatches} limit={20} />}
+      {memoryRegions.length > 0 && <MemoryRegionTable caption="Focused memory region artifacts" memoryRegions={memoryRegions} limit={focusedLimit} />}
+      {yaraMatches.length > 0 && <YaraMatchTable caption="Focused YARA match artifacts" yaraMatches={yaraMatches} limit={focusedLimit} />}
     </div>
   );
 }

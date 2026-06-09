@@ -11,17 +11,34 @@ from sqlalchemy.orm import Session
 
 from app.models import Case, Evidence
 from app.models.enums import EvidenceSourceType
+from app.core.config import get_settings
 from app.schemas.common import OSFamily
 from app.schemas.evidence import EvidenceRegister
 from app.services.errors import NotFoundError, ValidationError
 from app.storage.client import ObjectStorageClient
-from app.storage.validation import EvidenceValidationError
+from app.storage.validation import EvidenceValidationError, normalize_safe_filename, validate_evidence_extension
 
 
-def _copy_upload_to_temp(upload_file: UploadFile) -> Path:
+DIRECT_UPLOAD_COPY_CHUNK_SIZE = 1024 * 1024
+
+
+def _copy_upload_to_temp(upload_file: UploadFile, max_size_bytes: int) -> Path:
     suffix = Path(upload_file.filename or "evidence.raw").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-        shutil.copyfileobj(upload_file.file, temp_file, length=1024 * 1024)
+        total_bytes = 0
+        while True:
+            chunk = upload_file.file.read(DIRECT_UPLOAD_COPY_CHUNK_SIZE)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > max_size_bytes:
+                temp_path = Path(temp_file.name)
+                temp_file.close()
+                temp_path.unlink(missing_ok=True)
+                raise EvidenceValidationError(
+                    "direct evidence upload exceeds maximum size; use browser chunked upload for large memory dumps"
+                )
+            temp_file.write(chunk)
         return Path(temp_file.name)
 
 
@@ -43,7 +60,15 @@ def upload_evidence(
         raise NotFoundError("case not found")
 
     original_filename = upload_file.filename or "evidence.raw"
-    temp_path = _copy_upload_to_temp(upload_file)
+    settings = get_settings()
+    direct_upload_max_bytes = min(settings.evidence_direct_upload_max_bytes, settings.evidence_max_upload_bytes)
+    try:
+        safe_filename = normalize_safe_filename(original_filename)
+        validate_evidence_extension(safe_filename)
+        temp_path = _copy_upload_to_temp(upload_file, direct_upload_max_bytes)
+    except EvidenceValidationError as exc:
+        raise ValidationError(str(exc)) from exc
+
     try:
         evidence = Evidence(
             case_id=case_id,
@@ -87,10 +112,10 @@ def register_evidence(db: Session, data: EvidenceRegister) -> Evidence:
         raise NotFoundError("case not found")
     if data.source_type == EvidenceSourceType.UPLOAD.value:
         raise ValidationError("register endpoint cannot use source_type=upload")
+    if data.source_type == EvidenceSourceType.LOCAL_PATH.value:
+        raise ValidationError("local_path evidence registration is disabled for the demo workflow; use upload or minio_object")
     if data.source_type == EvidenceSourceType.MINIO_OBJECT.value and (not data.storage_bucket or not data.storage_key):
         raise ValidationError("minio_object evidence requires storage_bucket and storage_key")
-    if data.source_type == EvidenceSourceType.LOCAL_PATH.value and not data.local_path:
-        raise ValidationError("local_path evidence requires local_path")
 
     evidence = Evidence(**data.model_dump())
     db.add(evidence)

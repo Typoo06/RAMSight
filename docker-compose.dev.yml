@@ -97,7 +97,7 @@ services:
       VOLATILITY_SYMBOL_PATH: ${VOLATILITY_SYMBOL_PATH:-/opt/volatility/symbols}
       VOLATILITY_PLUGIN_TIMEOUT_SECONDS: ${VOLATILITY_PLUGIN_TIMEOUT_SECONDS:-300}
       VOLATILITY_YARA_TIMEOUT_SECONDS: ${VOLATILITY_YARA_TIMEOUT_SECONDS:-900}
-      VOLATILITY_YARA_RULES_PATH: ${VOLATILITY_YARA_RULES_PATH:-}
+      VOLATILITY_YARA_RULES_PATH: ${VOLATILITY_YARA_RULES_PATH:-/rules/yara/ramsight_memory_triage_demo.yar}
     command: celery -A app.celery_app.celery_app worker --loglevel=info
     volumes:
       - ./worker:/app

@@ -22,13 +22,22 @@ def list_yara_files_in_directory(directory: str | Path) -> list[Path]:
 
 
 def resolve_yara_rules_path(settings: Settings) -> Path | None:
+    rules_dir = getattr(settings, "rules_dir", None)
     if settings.volatility_yara_rules_path:
         configured_path = Path(settings.volatility_yara_rules_path)
         if configured_path.is_file():
             return configured_path
+        if not configured_path.is_absolute() and rules_dir:
+            rules_root = Path(rules_dir)
+            candidate_paths = [
+                rules_root / configured_path,
+                rules_root.parent / configured_path,
+            ]
+            for candidate in candidate_paths:
+                if candidate.is_file():
+                    return candidate
         configured_rule_files = list_yara_files_in_directory(configured_path)
         return configured_rule_files[0] if configured_rule_files else None
-    rules_dir = getattr(settings, "rules_dir", None)
     if not rules_dir:
         return None
     rule_files = list_yara_rule_files(rules_dir)

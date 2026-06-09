@@ -18,6 +18,16 @@ export function formatBytes(value: number | null | undefined): string {
   return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }
 
+export function formatDurationMs(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "Not recorded";
+  if (value < 1000) return `${value} ms`;
+  const totalSeconds = Math.round(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
 export function displayValue(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "Not recorded";
   return String(value);
