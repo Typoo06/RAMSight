@@ -13,19 +13,39 @@
     table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; table-layout: fixed; }
     th, td { border: 1px solid #d8e0e6; padding: 6px 8px; vertical-align: top; word-break: break-word; }
     th { background: #eef3f6; text-align: left; }
+    ul { margin-top: 4px; padding-left: 18px; }
     .muted { color: #5d6b75; }
+    .note { border-left: 3px solid #8aa1af; background: #f4f7f9; padding: 8px 10px; margin: 10px 0 16px; }
     .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .metric { border: 1px solid #d8e0e6; padding: 8px; }
     .metric strong { display: block; font-size: 18px; }
     .severity-critical { color: #8a1f11; font-weight: bold; }
     .severity-high { color: #a14a00; font-weight: bold; }
+    .severity-medium { color: #6f5b00; font-weight: bold; }
+    .severity-low { color: #3f6f4a; font-weight: bold; }
     .nowrap { white-space: nowrap; }
+    .compact td, .compact th { padding: 5px 6px; }
     @media print { body { margin: 18mm; } a { color: inherit; text-decoration: none; } }
   </style>
 </head>
 <body>
   <h1>{{ report_title }}</h1>
   <p class="muted">Report type: {{ report_type }} | Generated at: {{ generated_at }}</p>
+
+  <h2>Executive Summary</h2>
+  <div class="note">{{ executive_summary.analyst_note }}</div>
+  <div class="summary">
+    <div class="metric"><strong>{{ executive_summary.job_status }}</strong>Job status</div>
+    <div class="metric"><strong>{{ executive_summary.plugin_status }}</strong>Plugin status</div>
+    <div class="metric"><strong>{{ executive_summary.finding_count }}</strong>Total triage findings</div>
+    <div class="metric"><strong>{{ executive_summary.high_critical_count }}</strong>High/Critical findings</div>
+    <div class="metric"><strong>{{ executive_summary.ioc_count }}</strong>IOC records</div>
+    <div class="metric"><strong>{{ executive_summary.memory_region_summary }}</strong>Memory-region signals</div>
+  </div>
+  <table>
+    <tr><th>Evidence</th><td>{{ executive_summary.evidence_filename }}</td><th>OS / profile</th><td>{{ executive_summary.os_profile }}</td></tr>
+    <tr><th>YARA status</th><td colspan="3">{{ executive_summary.yara_status }}</td></tr>
+  </table>
 
   <h2>Case Information</h2>
   <table>
@@ -60,52 +80,193 @@
     <div class="metric"><strong>{{ summary.total_ioc_records }}</strong>IOC records</div>
   </div>
 
-  <h2>Top Suspicious Findings</h2>
-  {% if top_findings %}
-  <table>
-    <tr><th>Rule</th><th>Severity</th><th>Score</th><th>Artifact</th><th>Source plugin</th><th>Recommendation</th></tr>
-    {% for finding in top_findings %}
+  <h2>Plugin Results</h2>
+  {% if plugin_coverage_summary %}
+  <h3>Plugin Coverage Summary</h3>
+  <table class="compact">
+    <tr><th>Category</th><th>Selected</th><th>Completed</th><th>Failed</th><th>Skipped</th><th>Unavailable</th><th>Plugins</th></tr>
+    {% for row in plugin_coverage_summary %}
     <tr>
-      <td>{{ finding.rule_name or finding.title }}</td>
-      <td class="severity-{{ finding.severity }}">{{ finding.severity }}</td>
-      <td>{{ finding.score }}</td>
-      <td>{{ finding.artifact_type or "N/A" }}</td>
-      <td>{{ finding.source_plugin or "N/A" }}</td>
-      <td>{{ finding.recommendation or "Review with surrounding forensic context." }}</td>
+      <td>{{ row.category }}</td>
+      <td>{{ row.selected }}</td>
+      <td>{{ row.completed }}</td>
+      <td>{{ row.failed }}</td>
+      <td>{{ row.skipped }}</td>
+      <td>{{ row.unavailable }}</td>
+      <td>{% if row.plugins %}{{ row.plugins | join(", ") }}{% else %}N/A{% endif %}</td>
     </tr>
     {% endfor %}
   </table>
+  {% endif %}
+  {% if plugin_status_rows %}
+  <table class="compact">
+    <tr><th>Plugin</th><th>Category</th><th>Status</th><th>Parsed records</th><th>Duration ms</th><th>Timeout</th><th>Error summary</th></tr>
+    {% for plugin in plugin_status_rows %}
+    <tr>
+      <td>{{ plugin.plugin_name }}{% if plugin.is_yara_plugin %}<br><span class="muted">YARA plugin</span>{% endif %}{% if plugin.cli_plugin_name %}<br><span class="muted">{{ plugin.cli_plugin_name }}</span>{% endif %}</td>
+      <td>{{ plugin.category }}{% if plugin.parser_strategy %}<br><span class="muted">Parser: {{ plugin.parser_strategy }}</span>{% endif %}</td>
+      <td>{{ plugin.status }}</td>
+      <td>{{ plugin.parsed_record_count }}</td>
+      <td>{{ plugin.duration_ms }}</td>
+      <td>{{ plugin.timeout_status }}</td>
+      <td>{{ plugin.error_summary }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No plugin result metadata was available.</p>{% endif %}
+
+  <h2>Top Actionable Detections</h2>
+  <p class="muted">Process-level detections and triage summaries are shown first. Supporting raw findings remain preserved below and in stored artifacts.</p>
+  {% if display_top_findings %}
+  <table>
+    <tr><th>Finding</th><th>Severity</th><th>Confidence</th><th>Process context</th><th>Evidence groups</th><th>Recommendation</th></tr>
+    {% for finding in display_top_findings %}
+    <tr>
+      <td>{{ finding.title }}</td>
+      <td class="severity-{{ finding.severity }}">{{ finding.severity }}</td>
+      <td>{{ finding.detection_confidence }}<br><span class="muted">Score {{ finding.score }}</span></td>
+      <td>
+        {% if finding.context_parts %}
+        <ul>{% for part in finding.context_parts %}<li>{{ part }}</li>{% endfor %}</ul>
+        {% else %}N/A{% endif %}
+      </td>
+      <td>{% if finding.evidence_groups %}<ul>{% for group in finding.evidence_groups %}<li>{{ group }}</li>{% endfor %}</ul>{% else %}{{ finding.artifact_type }}{% endif %}</td>
+      <td>{{ finding.recommendation }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if top_findings_omitted_count %}<p class="muted">{{ top_findings_omitted_count }} additional similar or lower-priority findings were omitted from this display section.</p>{% endif %}
   {% else %}<p>No risk findings were recorded.</p>{% endif %}
 
   <h2>Suspicious Process Summary</h2>
-  {% if process_risk_summaries %}
+  {% if process_finding_groups %}
   <table>
-    <tr><th>Title</th><th>Severity</th><th>Score</th><th>Details</th></tr>
-    {% for finding in process_risk_summaries %}
-    <tr><td>{{ finding.title }}</td><td>{{ finding.severity }}</td><td>{{ finding.score }}</td><td>{{ finding.extra_data }}</td></tr>
+    <tr><th>Process</th><th>Severity</th><th>Score</th><th>Evidence groups</th><th>Counts</th><th>Component rules</th><th>Recommendation</th></tr>
+    {% for process in process_finding_groups %}
+    <tr>
+      <td>{{ process.identity }}</td>
+      <td class="severity-{{ process.severity }}">{{ process.severity }}</td>
+      <td>{{ process.score }}</td>
+      <td>{% if process.evidence_groups %}<ul>{% for group in process.evidence_groups %}<li>{{ group }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      <td>
+        <ul>
+          <li>Memory regions: {{ process.memory_region_count }}</li>
+          <li>Network endpoints: {{ process.network_endpoint_count }}</li>
+          <li>YARA rules: {{ process.yara_rule_count }}</li>
+          <li>YARA raw matches: {{ process.yara_raw_match_count }}</li>
+        </ul>
+      </td>
+      <td>{% if process.component_rule_ids %}<ul>{% for rule in process.component_rule_ids %}<li>{{ rule }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      <td>{{ process.recommendation }}</td>
+    </tr>
     {% endfor %}
   </table>
-  {% else %}<p>No process risk summary findings were recorded.</p>{% endif %}
+  {% else %}<p>No process-centered risk summaries were available.</p>{% endif %}
+
+  <h2>Memory-only Evidence Chains</h2>
+  <p class="muted">Chains group triage evidence by process. They support review; they are not conclusions of compromise.</p>
+  {% if memory_evidence_chains %}
+    {% for chain in memory_evidence_chains %}
+    <h3>{{ chain.identity }}</h3>
+    <table>
+      <tr><th>Severity</th><td class="severity-{{ chain.severity }}">{{ chain.severity }}</td><th>Score</th><td>{{ chain.score }}</td></tr>
+      <tr><th>Evidence groups</th><td colspan="3">{% if chain.evidence_groups %}{% for group in chain.evidence_groups %}{{ group }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td></tr>
+      <tr><th>Analyst interpretation</th><td colspan="3">{{ chain.interpretation }}</td></tr>
+    </table>
+    <table class="compact">
+      <tr><th>Memory evidence</th><th>YARA evidence</th><th>Network evidence</th><th>IOC references</th></tr>
+      <tr>
+        <td>
+          {% if chain.memory_regions %}<ul>{% for region in chain.memory_regions %}<li>{{ region.address_range }} | {{ region.protection }} | {{ region.source_plugin }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}
+          {% if chain.memory_region_count > 3 %}<span class="muted">Additional memory regions omitted from this compact chain.</span>{% endif %}
+        </td>
+        <td>{% if chain.yara_rules %}<ul>{% for rule in chain.yara_rules %}<li>{{ rule }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}{% if chain.yara_raw_match_count %}<span class="muted">Raw matches: {{ chain.yara_raw_match_count }}</span>{% endif %}</td>
+        <td>{% if chain.network_endpoints %}<ul>{% for endpoint in chain.network_endpoints %}<li>{{ endpoint }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+        <td>{% if chain.ioc_references %}<ul>{% for item in chain.ioc_references %}<li>{{ item.ioc_type }}: {{ item.count }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      </tr>
+    </table>
+    {% endfor %}
+  {% else %}<p>No process-centered memory-only evidence chains were available.</p>{% endif %}
+
+  <h2>Threat-Oriented IOCs</h2>
+  <p class="muted">{{ ioc_export_note }}</p>
+  {% if threat_ioc_summary %}
+  <table>
+    <tr><th>IOC type</th><th>Count</th><th>Representative values</th><th>Source plugins</th><th>Confidence range</th></tr>
+    {% for row in threat_ioc_summary %}
+    <tr>
+      <td>{{ row.ioc_type }}</td>
+      <td>{{ row.count }}</td>
+      <td>{% if row.representative_values %}<ul>{% for value in row.representative_values %}<li>{{ value }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      <td>{% if row.source_plugins %}{% for plugin in row.source_plugins %}{{ plugin }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>{{ row.confidence_range }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No threat-oriented IOC records were extracted.</p>{% endif %}
+
+  <h2>Investigation Artifacts</h2>
+  <p class="muted">These are useful pivots for investigation, but they are not presented as standalone threat IOCs.</p>
+  {% if investigation_artifact_summary %}
+  <table>
+    <tr><th>Artifact type</th><th>Count</th><th>Representative values</th><th>Source plugins</th><th>Confidence range</th></tr>
+    {% for row in investigation_artifact_summary %}
+    <tr>
+      <td>{{ row.ioc_type }}</td>
+      <td>{{ row.count }}</td>
+      <td>{% if row.representative_values %}<ul>{% for value in row.representative_values %}<li>{{ value }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      <td>{% if row.source_plugins %}{% for plugin in row.source_plugins %}{{ plugin }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>{{ row.confidence_range }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No investigation artifact IOC records were extracted.</p>{% endif %}
 
   <h2>Network Indicators</h2>
-  {% if network_indicators %}
+  {% if network_display %}
+  <p class="muted">{{ network_display.note }}</p>
+  <p class="muted">Showing {{ network_display.displayed_count }} of {{ network_display.total_count }} network artifacts. {{ network_display.omitted_count }} rows were omitted from this display section.</p>
+  {% endif %}
+  {% if network_display and network_display.rows %}
   <table>
-    <tr><th>Protocol</th><th>Local</th><th>Remote</th><th>State</th><th>PID</th><th>Process</th></tr>
-    {% for item in network_indicators %}
-    <tr><td>{{ item.protocol or "" }}</td><td>{{ item.local_address }}:{{ item.local_port }}</td><td>{{ item.remote_address }}:{{ item.remote_port }}</td><td>{{ item.state or "" }}</td><td>{{ item.pid or "" }}</td><td>{{ item.process_name or "" }}</td></tr>
+    <tr><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th><th>State</th><th>PID</th><th>Process</th><th>Display context</th><th>Similar rows</th></tr>
+    {% for item in network_display.rows %}
+    <tr>
+      <td>{{ item.protocol }}</td>
+      <td>{{ item.local_endpoint }}</td>
+      <td>{{ item.remote_endpoint }}</td>
+      <td>{{ item.state }}</td>
+      <td>{{ item.pid }}</td>
+      <td>{{ item.process_name }}</td>
+      <td>{{ item.reason }}</td>
+      <td>{{ item.similar_count }}</td>
+    </tr>
     {% endfor %}
   </table>
   {% else %}<p>No network artifacts are available for this report section.</p>{% endif %}
 
   <h2>Suspicious Module Paths</h2>
-  {% if module_artifacts %}
+  {% if module_display %}
+  <p class="muted">{{ module_display.note }}</p>
+  <p class="muted">Showing {{ module_display.displayed_count }} representative module-path rows from {{ module_display.selected_count }} selected module artifacts ({{ module_display.total_count }} total module artifacts). {{ module_display.omitted_count }} similar rows were omitted.</p>
+  {% endif %}
+  {% if module_display and module_display.rows %}
   <table>
-    <tr><th>Process</th><th>PID</th><th>Module</th><th>Path</th><th>Source plugin</th></tr>
-    {% for module in module_artifacts %}
-    <tr><td>{{ module.process_name or "" }}</td><td>{{ module.pid or "" }}</td><td>{{ module.module_name or "" }}</td><td>{{ module.module_path or "" }}</td><td>{{ module.source_plugin or "" }}</td></tr>
+    <tr><th>Process</th><th>PID</th><th>Module</th><th>Path</th><th>Classification</th><th>Context note</th><th>Source plugin</th><th>Similar rows</th></tr>
+    {% for module in module_display.rows %}
+    <tr>
+      <td>{{ module.process_name }}</td>
+      <td>{{ module.pid }}</td>
+      <td>{{ module.module_name }}</td>
+      <td>{{ module.module_path }}</td>
+      <td>{{ module.classification }}</td>
+      <td>{{ module.context_note }}</td>
+      <td>{{ module.source_plugin }}</td>
+      <td>{{ module.similar_count }}</td>
+    </tr>
     {% endfor %}
   </table>
-  {% else %}<p>No suspicious module path artifacts were selected.</p>{% endif %}
+  {% else %}<p>No suspicious module path artifacts were selected for this capped display section.</p>{% endif %}
 
   <h2>Memory Region Findings</h2>
   {% if memory_regions %}
@@ -118,30 +279,34 @@
   {% else %}<p>No suspicious memory region artifacts were recorded.</p>{% endif %}
 
   <h2>YARA Matches</h2>
-  {% if yara_matches %}
+  {% if yara_status and yara_status.message %}<p>{{ yara_status.message }}</p>{% endif %}
+  <p class="muted">Third-party YARA rules are defensive triage aids. Treat matches as leads for correlation with process, memory-region, command-line, module, and network evidence.</p>
+  {% if yara_summary %}
   <table>
-    <tr><th>Rule</th><th>Namespace</th><th>Target</th><th>Offset</th><th>Source plugin</th></tr>
-    {% for match in yara_matches %}
-    <tr><td>{{ match.rule_name }}</td><td>{{ match.namespace or "" }}</td><td>{{ match.target_identifier or "" }}</td><td>{{ match.offset or "" }}</td><td>{{ match.source_plugin or "" }}</td></tr>
+    <tr><th>Rule</th><th>Pack</th><th>Category / family</th><th>Match count</th><th>Representative targets</th><th>Sample offsets</th><th>Source plugins</th></tr>
+    {% for row in yara_summary %}
+    <tr>
+      <td>{{ row.rule_name }}</td>
+      <td>{% if row.source_packs %}{% for pack in row.source_packs %}{{ pack }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>
+        {% if row.rule_categories %}Category: {% for category in row.rule_categories %}{{ category }}{% if not loop.last %}, {% endif %}{% endfor %}<br>{% endif %}
+        {% if row.malware_families %}Family: {% for family in row.malware_families %}{{ family }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        {% if not row.rule_categories and not row.malware_families %}N/A{% endif %}
+      </td>
+      <td>{{ row.match_count }}</td>
+      <td>{% if row.targets %}{% for target in row.targets %}{{ target }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>{% if row.sample_offsets %}{% for offset in row.sample_offsets %}{{ offset }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>{% if row.source_plugins %}{% for plugin in row.source_plugins %}{{ plugin }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+    </tr>
     {% endfor %}
   </table>
-  {% else %}<p>No YARA match artifacts were recorded.</p>{% endif %}
+  {% elif not yara_status or not yara_status.message %}<p>No YARA match artifacts were recorded.</p>{% endif %}
 
-  <h2>IOC Table</h2>
-  {% if iocs %}
-  <table>
-    <tr><th>Type</th><th>Value</th><th>Confidence</th><th>Source plugin</th><th>Context</th></tr>
-    {% for ioc in iocs %}
-    <tr><td>{{ ioc.ioc_type }}</td><td>{{ ioc.value }}</td><td>{{ ioc.confidence or "" }}</td><td>{{ ioc.source_plugin or "" }}</td><td>{{ ioc.context or "" }}</td></tr>
-    {% endfor %}
-  </table>
-  {% else %}<p>No IOC records were extracted.</p>{% endif %}
-
-  <h2>Raw Plugin Output References</h2>
+  <h2>Raw and Parsed Output References</h2>
   <table>
     <tr><th>Plugin</th><th>Status</th><th>Raw bucket</th><th>Raw key</th><th>Parsed bucket</th><th>Parsed key</th></tr>
-    {% for plugin in plugin_results %}
-    <tr><td>{{ plugin.plugin_name }}</td><td>{{ plugin.status }}</td><td>{{ plugin.raw_output_bucket or "" }}</td><td>{{ plugin.raw_output_key or "" }}</td><td>{{ plugin.parsed_output_bucket or "" }}</td><td>{{ plugin.parsed_output_key or "" }}</td></tr>
+    {% for plugin in plugin_status_rows %}
+    <tr><td>{{ plugin.plugin_name }}</td><td>{{ plugin.status }}</td><td>{{ plugin.raw_output_bucket }}</td><td>{{ plugin.raw_output_key }}</td><td>{{ plugin.parsed_output_bucket }}</td><td>{{ plugin.parsed_output_key }}</td></tr>
     {% endfor %}
   </table>
 

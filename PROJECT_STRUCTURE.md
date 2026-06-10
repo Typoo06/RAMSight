@@ -1,6 +1,6 @@
 # Project Structure
 
-This document describes the intended repository layout for the Memory Malware Triage Platform.
+This document describes the repository layout for RAMSight, a local/dev memory forensics and memory-only malware triage platform.
 
 The platform is designed to support both Windows and Linux memory dump analysis.
 
@@ -150,7 +150,7 @@ The worker handles long-running analysis jobs:
 7. Run detection rules
 8. Calculate risk scores
 9. Extract IOC
-10. Generate HTML/PDF reports
+10. Generate HTML reports
 11. Upload outputs and reports to MinIO/S3
 12. Update job status in PostgreSQL
 ```
@@ -172,7 +172,7 @@ windows.netscan
 windows.dlllist
 windows.handles
 windows.malfind
-yarascan
+windows.vadyarascan (optional windows_memory_yara profile)
 ```
 
 ### Planned Linux Plugin Profile
@@ -357,19 +357,18 @@ Default risk levels:
 ```text
 reports/
 ├── templates/               # Jinja2 HTML report templates
-├── static/                  # CSS, images, report assets
-└── examples/                # Example generated reports
+└── static/                  # CSS, images, report assets
 ```
 
 Reports should support:
 
 ```text
-- Technical report
-- Executive summary
-- IOC export
+- Technical HTML report
+- Executive-summary style sections inside the technical report
+- IOC export references
 ```
 
-The MVP should generate HTML first. PDF export should reuse the same HTML template later.
+The MVP generates HTML reports. PDF export is planned for a later task and should reuse the same HTML template.
 
 Report content should include:
 
@@ -449,7 +448,6 @@ reports/
 └── case-{case_id}/
     └── job-{job_id}/
         ├── technical_report.html
-        ├── technical_report.pdf
         ├── executive_summary.html
         └── ioc_export.csv
 
@@ -509,9 +507,12 @@ Case
 docs/
 ├── architecture/            # System architecture, data flow, database design
 ├── api/                     # OpenAPI and API references
+├── demo/                    # Local demo and thesis defense runbooks
+├── operations/              # Local operations and reliability notes
 ├── deployment/              # Docker setup and deployment instructions
 ├── user-guide/              # User-facing guide
 ├── developer-guide/         # Developer guide
+├── validation/              # Validation notes and sanitized examples
 └── thesis-materials/        # Materials used for academic report
 ```
 
@@ -521,14 +522,11 @@ docs/
 
 ```text
 scripts/
-├── dev_setup.sh
-├── run_migrations.sh
-├── create_minio_buckets.sh
-├── seed_demo_data.py
-├── run_demo_analysis.sh
-├── export_openapi.sh
-├── clean_outputs.sh
-└── backup_database.sh
+├── demo/
+│   └── preflight_check.py   # Local demo readiness checks
+├── validation/              # Small validation summary helpers
+├── cleanup_stale_upload_sessions.py
+└── README.md
 ```
 
 ---
@@ -596,6 +594,7 @@ Use MinIO/S3 or ignored local folders for:
 - memory dumps
 - generated Volatility outputs
 - generated reports
+- generated IOC exports
 - temporary workspaces
 ```
 

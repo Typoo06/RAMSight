@@ -10,23 +10,83 @@ import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
 import { Table } from "../components/ui/Table";
 import type { AnalysisJob, AnalysisPluginProfile, Case, Evidence } from "../types/domain";
-import { displayValue, formatBytes, formatDateTime, shortHash } from "../utils/format";
+import { displayValue, formatBytes, formatDateTime, formatDurationMs, shortHash } from "../utils/format";
 import { statusTone } from "../utils/status";
 
-const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_default";
+const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_memory_yara_elastic";
 
 const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; value: AnalysisPluginProfile }> = [
   {
     value: "windows_default",
     label: "Standard Windows triage",
-    description: "Fast default RAMSight analysis without YARA scanning.",
+    description: "Fast default RAMSight analysis without YARA process-memory scanning.",
   },
   {
-    value: "windows_memory_yara",
-    label: "Windows memory + YARA triage",
-    description: "Runs memory triage plus YARA process-memory scanning when rules are available.",
+    value: "windows_memory_yara_elastic",
+    label: "Windows memory + Elastic YARA",
+    description: "Recommended demo path: standard Windows triage plus Elastic third-party YARA process-memory scanning.",
+  },
+  {
+    value: "windows_memory_yara_neo23x0",
+    label: "Windows memory + Neo23x0 YARA",
+    description: "Runs standard Windows triage plus Neo23x0 Signature Base process-memory YARA rules.",
+  },
+  {
+    value: "windows_memory_yara_third_party_all",
+    label: "Third-party YARA All (slow)",
+    description: "Runs Elastic and Neo23x0 YARA packs together. Use explicitly; this can be slow and memory intensive on large dumps.",
+  },
+  {
+    value: "windows_memory_deep",
+    label: "Deep Windows memory triage",
+    description: "Runs deeper VAD, injection, hollowing, module, and thread-oriented Volatility plugins without YARA.",
+  },
+  {
+    value: "windows_memory_deep_yara_elastic",
+    label: "Deep memory + Elastic YARA",
+    description: "Deep Windows memory triage plus Elastic YARA. Slower than the standard Elastic profile.",
+  },
+  {
+    value: "windows_memory_deep_yara_neo23x0",
+    label: "Deep memory + Neo23x0 YARA",
+    description: "Deep Windows memory triage plus Neo23x0 Signature Base YARA. Use for deeper investigation.",
+  },
+  {
+    value: "windows_memory_deep_yara_third_party_all",
+    label: "Deep memory + Third-party YARA All (very slow)",
+    description: "Deep Volatility coverage plus Elastic and Neo23x0 YARA packs. Advanced investigation only; very slow on large dumps.",
+  },
+  {
+    value: "windows_malware_evasion",
+    label: "Windows malware evasion scan",
+    description: "Runs syscall, ETW, callback, SSDT, and hooking/evasion-oriented Volatility plugins.",
+  },
+  {
+    value: "windows_kernel_rootkit",
+    label: "Windows kernel/rootkit scan",
+    description: "Runs kernel module, driver, callback, thread, timer, and rootkit-context Volatility plugins.",
+  },
+  {
+    value: "windows_investigation_context",
+    label: "Windows investigation context scan",
+    description: "Runs services, scheduled tasks, SID, privilege, session, mutex, shimcache, AmCache, and command-history context plugins.",
   },
 ];
+
+const PROFILE_LABELS: Record<string, string> = {
+  windows_default: "Standard Windows triage",
+  windows_memory_yara: "Elastic YARA (compatibility alias)",
+  windows_memory_yara_elastic: "Windows memory + Elastic YARA",
+  windows_memory_yara_neo23x0: "Windows memory + Neo23x0 YARA",
+  windows_memory_yara_third_party_all: "Third-party YARA All (slow)",
+  windows_memory_deep: "Deep Windows memory triage",
+  windows_memory_deep_yara_elastic: "Deep memory + Elastic YARA",
+  windows_memory_deep_yara_neo23x0: "Deep memory + Neo23x0 YARA",
+  windows_memory_deep_yara_third_party_all: "Deep memory + Third-party YARA All (very slow)",
+  windows_malware_evasion: "Windows malware evasion scan",
+  windows_kernel_rootkit: "Windows kernel/rootkit scan",
+  windows_investigation_context: "Windows investigation context scan",
+};
 
 function evidenceOsFamily(evidence: Evidence): string {
   return evidence.os_family || "windows";
@@ -54,7 +114,7 @@ function profileHelpText(evidence: Evidence, profile: AnalysisPluginProfile): st
 }
 
 function profileLabel(profile: string | null | undefined): string {
-  return ANALYSIS_PROFILE_OPTIONS.find((option) => option.value === profile)?.label ?? displayValue(profile);
+  return PROFILE_LABELS[String(profile || "").toLowerCase()] ?? displayValue(profile);
 }
 
 export function CaseDetailPage() {
@@ -174,7 +234,8 @@ export function CaseDetailPage() {
           <p>{caseRecord.description || "No case description has been recorded."}</p>
         </Card>
         <Card title="Workflow" actions={<Link className="text-link" to="/cases">Back to cases</Link>}>
-          <p>Upload memory evidence, start a queued worker analysis, then monitor the job until RAMSight reaches a terminal status.</p>
+          <p>Upload memory evidence, choose an analysis profile, then monitor the worker job until RAMSight reaches a terminal status.</p>
+          <p className="section-note">Large browser uploads use chunked transfer. RAMSight stores memory dump bytes in object storage and keeps metadata, hashes, and normalized records in PostgreSQL.</p>
           <Link className="text-link" to={`/cases/${caseId}/evidence/upload`}>
             Upload evidence
           </Link>
@@ -184,10 +245,11 @@ export function CaseDetailPage() {
       {startError && <ErrorState message={startError} title="Analysis job could not be created" />}
 
       <Card title="Evidence" actions={<Link className="text-link" to={`/cases/${caseId}/evidence/upload`}>Upload evidence</Link>}>
+        <p className="section-note">Evidence rows show stored metadata only. RAMSight does not keep memory dump contents in React state or PostgreSQL.</p>
         {evidenceLoading && <LoadingState label="Loading RAMSight evidence metadata..." />}
         {evidenceError && <ErrorState message={evidenceError} title="Evidence metadata unavailable" />}
         {!evidenceLoading && !evidenceError && evidences.length === 0 && (
-          <p className="muted">No evidence has been uploaded for this case yet.</p>
+          <p className="muted">No evidence has been uploaded for this case yet. Upload a memory image to begin RAMSight triage.</p>
         )}
         {!evidenceLoading && !evidenceError && evidences.length > 0 && (
           <div className="item-list">
@@ -276,10 +338,10 @@ export function CaseDetailPage() {
                   <td>{displayValue(job.os_family)}</td>
                   <td>{profileLabel(job.plugin_profile)}</td>
                   <td>{formatDateTime(job.updated_at)}</td>
-                  <td>{job.duration_ms === null ? "Not recorded" : `${job.duration_ms} ms`}</td>
+                  <td>{formatDurationMs(job.duration_ms)}</td>
                   <td>
                     <Link className="text-link" to={`/cases/${caseId}/jobs/${job.id}`}>
-                      View status
+                      View results
                     </Link>
                   </td>
                 </tr>

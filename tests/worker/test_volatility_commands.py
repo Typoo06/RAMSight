@@ -46,7 +46,7 @@ def test_build_command_omits_symbol_dirs_when_not_configured() -> None:
     )
 
     assert "-s" not in command
-    assert command[-1] == "windows.malfind.Malfind"
+    assert command[-1] == "windows.malware.malfind.Malfind"
 
 
 def test_build_yarascan_command_adds_yara_file_when_configured() -> None:
@@ -84,11 +84,11 @@ def test_build_vadyarascan_command_places_plugin_args_after_plugin_name() -> Non
         get_plugin_definition("windows.vadyarascan"),
         Path("/workspace/evidence.raw"),
         Path("/workspace/raw"),
-        yara_rules_path="/rules/ramsight_memory_triage_demo.yar",
+        yara_rules_path="/rules/yara/compiled/elastic_yara.yar",
     )
 
     assert command[-3:] == [
         "windows.vadyarascan.VadYaraScan",
         "--yara-file",
-        "/rules/ramsight_memory_triage_demo.yar",
+        "/rules/yara/compiled/elastic_yara.yar",
     ]

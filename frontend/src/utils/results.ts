@@ -74,7 +74,7 @@ export function severityRank(severity: string): number {
 
 export function sortFindingsByRisk(findings: RiskFinding[]): RiskFinding[] {
   return [...findings].sort((left, right) => {
-    const severityDifference = severityRank(right.severity) - severityRank(left.severity);
+    const severityDifference = severityRank(right.effective_severity ?? right.severity) - severityRank(left.effective_severity ?? left.severity);
     if (severityDifference !== 0) return severityDifference;
     return right.score - left.score;
   });

@@ -27,3 +27,6 @@ class IOCRead(OrmModel):
 
 class IOCListResponse(BaseModel):
     items: list[IOCRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None

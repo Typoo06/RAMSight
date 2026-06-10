@@ -24,6 +24,7 @@ minio-data/
 *.dmp
 *.dump
 *.lime
+*.aff4
 sample-data/memory-dumps/*
 !sample-data/memory-dumps/.gitkeep
 !sample-data/memory-dumps/DO_NOT_COMMIT_LARGE_FILES.txt
@@ -42,3 +43,8 @@ volatility-outputs/
 # Logs
 *.log
 logs/
+# Generated reports / exports
+technical_report*.html
+report*.html
+ioc_export*.json
+ioc_export*.csv

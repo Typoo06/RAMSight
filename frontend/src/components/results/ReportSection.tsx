@@ -12,6 +12,7 @@ interface ReportSectionProps {
 export function ReportSection({ reports }: ReportSectionProps) {
   return (
     <div className="page-stack compact-stack">
+      <p className="section-note">Generated HTML reports are downloaded as files. RAMSight does not render report HTML inline in the results page.</p>
       <Table caption="RAMSight report metadata">
         <thead>
           <tr>
@@ -31,8 +32,8 @@ export function ReportSection({ reports }: ReportSectionProps) {
               <td><Badge tone={statusTone(report.format)}>{report.format}</Badge></td>
               <td>{displayValue(report.os_family)}</td>
               <td>{formatDateTime(report.generated_at)}</td>
-              <td>{displayValue(report.storage_bucket)}</td>
-              <td><code>{displayValue(report.storage_key)}</code></td>
+              <td className="long-text">{displayValue(report.storage_bucket)}</td>
+              <td className="long-text"><code className="code-value">{displayValue(report.storage_key)}</code></td>
               <td>
                 <a className="button button-secondary button-small" href={reportDownloadUrl(report.id)}>
                   Download HTML report

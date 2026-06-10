@@ -1,0 +1,13 @@
+{
+  "compile_status": "not_applicable",
+  "disabled_rule_files": [],
+  "imported_path": "rules/sigma/third_party/sigmahq",
+  "import_status": "not_imported",
+  "import_timestamp": null,
+  "license": "Detection Rule License 1.1",
+  "notes": "SigmaHQ rules are reference/future correlation content only and are not passed to Volatility YARA scanning. The live import was not completed in this environment; run scripts/rules/import_third_party_rules.py --source sigmahq when network and time allow.",
+  "rule_count": 0,
+  "source_ref": "master",
+  "source_repository": "SigmaHQ/sigma",
+  "source_url": "https://github.com/SigmaHQ/sigma"
+}

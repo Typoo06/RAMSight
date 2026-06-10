@@ -151,10 +151,11 @@ def test_placeholder_path_values_are_not_extracted_as_iocs() -> None:
 
 
 def test_yara_rule_ioc_extraction() -> None:
+    yara_id = uuid4()
     artifacts = {
         YARA_TABLE: [
             {
-                "id": uuid4(),
+                "id": yara_id,
                 "rule_name": "SuspiciousRule",
                 "namespace": "default",
                 "tags": ["malware"],
@@ -171,6 +172,102 @@ def test_yara_rule_ioc_extraction() -> None:
 
     assert len(iocs_by_type(iocs, IOC_YARA_RULE)) == 1
     assert iocs_by_type(iocs, IOC_YARA_RULE)[0].extra_data["severity"] == "critical"
+    assert iocs_by_type(iocs, IOC_YARA_RULE)[0].extra_data["ioc_role"] == "investigation_artifact"
+
+
+def test_correlated_malware_specific_yara_rule_is_threat_ioc() -> None:
+    yara_id = uuid4()
+    artifacts = {
+        YARA_TABLE: [
+            {
+                "id": yara_id,
+                "rule_name": "Windows_Trojan_CobaltStrike_Beacon",
+                "namespace": "elastic",
+                "tags": ["malware"],
+                "target_identifier": "PID 14484",
+                "offset": 4096,
+                "matched_text_excerpt": "beacon",
+                "source_plugin": "windows.vadyarascan",
+                "extra_data": {"severity": "high", "malware_family": "cobaltstrike", "rule_category": "malware"},
+            }
+        ]
+    }
+    findings = [
+        {
+            **risk_finding(YARA_TABLE, yara_id, severity="high"),
+            "extra_data": {"linked_memory_region_artifact_ids": [str(uuid4())], "detection_confidence": "probable_malware"},
+        }
+    ]
+
+    iocs = extract_iocs(artifacts, findings, context())
+
+    yara_ioc = iocs_by_type(iocs, IOC_YARA_RULE)[0]
+    assert yara_ioc.extra_data["ioc_role"] == "threat_ioc"
+    assert yara_ioc.extra_data["correlated"] is True
+
+
+def test_probable_malware_yara_only_finding_is_not_threat_ioc_without_correlation() -> None:
+    yara_id = uuid4()
+    artifacts = {
+        YARA_TABLE: [
+            {
+                "id": yara_id,
+                "rule_name": "Windows_Trojan_Generic_Loader",
+                "namespace": "elastic",
+                "tags": ["malware"],
+                "target_identifier": "PID 1780",
+                "offset": 4096,
+                "source_plugin": "windows.vadyarascan",
+                "extra_data": {"severity": "high", "malware_family": "generic_loader", "rule_category": "malware"},
+            }
+        ]
+    }
+    findings = [
+        {
+            **risk_finding(YARA_TABLE, yara_id, severity="high"),
+            "extra_data": {"detection_confidence": "probable_malware"},
+        }
+    ]
+
+    iocs = extract_iocs(artifacts, findings, context())
+
+    yara_ioc = iocs_by_type(iocs, IOC_YARA_RULE)[0]
+    assert yara_ioc.extra_data["ioc_role"] == "investigation_artifact"
+    assert yara_ioc.extra_data["correlated"] is False
+
+
+def test_generic_linux_yara_in_windows_scan_is_investigation_artifact() -> None:
+    yara_id = uuid4()
+    artifacts = {
+        YARA_TABLE: [
+            {
+                "id": yara_id,
+                "rule_name": "Linux_ELF_Generic_Suspicious_String",
+                "namespace": "elastic",
+                "tags": ["linux", "elf"],
+                "target_identifier": "PID 1780",
+                "offset": 4096,
+                "source_plugin": "windows.vadyarascan",
+                "extra_data": {
+                    "severity": "high",
+                    "rule_category": "generic",
+                    "description": "Linux ELF generic heuristic",
+                },
+            }
+        ]
+    }
+    findings = [
+        {
+            **risk_finding(YARA_TABLE, yara_id, severity="high"),
+            "extra_data": {"linked_memory_region_artifact_ids": [str(uuid4())], "detection_confidence": "probable_malware"},
+        }
+    ]
+
+    iocs = extract_iocs(artifacts, findings, context())
+
+    yara_ioc = iocs_by_type(iocs, IOC_YARA_RULE)[0]
+    assert yara_ioc.extra_data["ioc_role"] == "investigation_artifact"
+    assert yara_ioc.extra_data["cross_platform_mismatch"] is True
 
 
 def test_memory_region_ioc_extraction() -> None:
@@ -275,3 +372,44 @@ def test_pid_iocs_deduplicate_across_pslist_and_psscan_sources() -> None:
     iocs = extract_iocs(artifacts, findings, context())
 
     assert len(iocs_by_type(iocs, IOC_PID)) == 1
+
+
+def test_known_microsoft_appdata_modules_do_not_emit_default_module_path_iocs() -> None:
+    artifacts = {
+        MODULE_TABLE: [
+            {
+                "id": uuid4(),
+                "module_name": f"component{index}.dll",
+                "module_path": f"C:\\Users\\analyst\\AppData\\Local\\Microsoft\\OneDrive\\24.1\\component{index}.dll",
+                "pid": 6620,
+                "process_name": "OneDrive.exe",
+                "source_plugin": "windows.dlllist",
+            }
+            for index in range(8)
+        ]
+    }
+
+    iocs = extract_iocs(artifacts, [], context())
+
+    assert iocs_by_type(iocs, IOC_MODULE_PATH) == []
+
+
+def test_unknown_appdata_module_path_still_extracts_module_ioc() -> None:
+    artifacts = {
+        MODULE_TABLE: [
+            {
+                "id": uuid4(),
+                "module_name": "payload.dll",
+                "module_path": "C:\\Users\\analyst\\AppData\\Local\\OddVendor\\payload.dll",
+                "pid": 2924,
+                "process_name": "WinRAR.exe",
+                "source_plugin": "windows.dlllist",
+            }
+        ]
+    }
+
+    iocs = extract_iocs(artifacts, [], context())
+
+    module_iocs = iocs_by_type(iocs, IOC_MODULE_PATH)
+    assert len(module_iocs) == 1
+    assert module_iocs[0].normalized_value == "c:/users/analyst/appdata/local/oddvendor/payload.dll"

@@ -31,11 +31,18 @@ class ParserError(ValueError):
     pass
 
 
-def load_raw_wrapper(path) -> dict:
+def load_json_file(path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ParserError("raw wrapper is not valid JSON") from exc
+        raise ParserError("Volatility output is not valid JSON") from exc
+
+
+def load_raw_wrapper(path) -> dict:
+    data = load_json_file(path)
+    if not isinstance(data, dict):
+        raise ParserError("raw wrapper is not a JSON object")
+    return data
 
 
 def parse_stdout_json(wrapper: dict) -> Any:

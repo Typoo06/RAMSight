@@ -4,7 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     env_file:
-      - .env.example
+      - .env
     environment:
       APP_ENV: ${APP_ENV:-development}
       API_HOST: ${API_HOST:-0.0.0.0}
@@ -20,6 +20,16 @@ services:
       MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS:-reports}
       MINIO_BUCKET_RAW_OUTPUTS: ${MINIO_BUCKET_RAW_OUTPUTS:-raw-outputs}
       MINIO_SECURE: ${MINIO_SECURE:-false}
+      MINIO_ROOT_USER: change-me
+      MINIO_ROOT_PASSWORD: change-me
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-http://localhost:5173,http://127.0.0.1:5173}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      MINIO_PUBLIC_SECURE: ${MINIO_PUBLIC_SECURE:-false}
+      EVIDENCE_MAX_UPLOAD_BYTES: ${EVIDENCE_MAX_UPLOAD_BYTES:-21474836480}
+      EVIDENCE_MULTIPART_PART_SIZE_BYTES: ${EVIDENCE_MULTIPART_PART_SIZE_BYTES:-67108864}
+      EVIDENCE_UPLOAD_TEMP_DIR: ${EVIDENCE_UPLOAD_TEMP_DIR:-/tmp/ramsight-evidence-uploads}
+      EVIDENCE_UPLOAD_CHUNK_SIZE_BYTES: ${EVIDENCE_UPLOAD_CHUNK_SIZE_BYTES:-16777216}
+      EVIDENCE_UPLOAD_SESSION_TTL_SECONDS: ${EVIDENCE_UPLOAD_SESSION_TTL_SECONDS:-86400}
       PYTHONPATH: /app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
@@ -76,7 +86,7 @@ services:
       context: ./worker
       dockerfile: Dockerfile.dev
     env_file:
-      - .env.example
+      - .env
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://memory_triage:change-me@postgres:5432/memory_triage}
@@ -96,8 +106,9 @@ services:
       VOLATILITY_PATH: ${VOLATILITY_PATH:-vol}
       VOLATILITY_SYMBOL_PATH: ${VOLATILITY_SYMBOL_PATH:-/opt/volatility/symbols}
       VOLATILITY_PLUGIN_TIMEOUT_SECONDS: ${VOLATILITY_PLUGIN_TIMEOUT_SECONDS:-300}
-      VOLATILITY_YARA_RULES_PATH: ${VOLATILITY_YARA_RULES_PATH:-}
-    command: celery -A app.celery_app.celery_app worker --loglevel=info
+      VOLATILITY_YARA_TIMEOUT_SECONDS: ${VOLATILITY_YARA_TIMEOUT_SECONDS:-4000}
+      VOLATILITY_YARA_RULES_PATH: ${VOLATILITY_YARA_RULES_PATH:-/rules/yara/compiled/elastic_yara.yar}
+    command: celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo --concurrency=1
     volumes:
       - ./worker:/app
       - ./tests:/tests

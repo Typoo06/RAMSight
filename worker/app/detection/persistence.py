@@ -13,6 +13,7 @@ from app.db.tables import (
     module_artifacts,
     network_artifacts,
     process_artifacts,
+    plugin_results,
     risk_findings,
     yara_matches,
 )
@@ -43,6 +44,74 @@ def load_job_artifacts(conn: Connection, analysis_job_id: UUID) -> dict[str, lis
     return artifacts
 
 
+def load_job_plugin_results(conn: Connection, analysis_job_id: UUID) -> list[dict]:
+    rows = conn.execute(select(plugin_results).where(plugin_results.c.analysis_job_id == analysis_job_id)).mappings().all()
+    return [dict(row) for row in rows]
+
+
+PLUGIN_CONTEXT_RULES = {
+    "Memory/VAD": ("VOL_PLUGIN_MEMORY_VAD_CONTEXT", "VAD/memory layout context", "medium"),
+    "Injection/Hollowing": ("VOL_PLUGIN_INJECTION_CONTEXT", "Injection/hollowing plugin context", "medium"),
+    "Thread analysis": ("VOL_PLUGIN_THREAD_CONTEXT", "Thread analysis context", "medium"),
+    "Module/DLL": ("VOL_PLUGIN_MODULE_CONTEXT", "Module/DLL inconsistency context", "medium"),
+    "Evasion/Hooking": ("VOL_PLUGIN_EVASION_CONTEXT", "Syscall/hooking evasion context", "medium"),
+    "Kernel/Rootkit": ("VOL_PLUGIN_KERNEL_CONTEXT", "Kernel/rootkit context", "medium"),
+    "Persistence/Context": ("VOL_PLUGIN_PERSISTENCE_CONTEXT", "Persistence/investigation context", "low"),
+}
+
+
+def plugin_context_findings(context: dict, plugin_rows: list[dict]) -> list[FindingDraft]:
+    findings: list[FindingDraft] = []
+    for row in plugin_rows:
+        if str(row.get("status") or "").lower() != "completed":
+            continue
+        parsed_count = row.get("parsed_record_count") or 0
+        if parsed_count <= 0:
+            continue
+        extra = row.get("extra_data") if isinstance(row.get("extra_data"), dict) else {}
+        category = str(extra.get("plugin_category") or "")
+        if category not in PLUGIN_CONTEXT_RULES:
+            continue
+        rule_id, rule_name, severity = PLUGIN_CONTEXT_RULES[category]
+        plugin_name = str(row.get("plugin_name") or row.get("source_plugin") or "Volatility plugin")
+        findings.append(
+            FindingDraft(
+                analysis_job_id=context["analysis_job_id"],
+                evidence_id=context["evidence_id"],
+                plugin_result_id=row.get("id"),
+                os_family=(context.get("os_family") or "unknown").lower(),
+                os_scope="windows",
+                source_plugin=plugin_name,
+                rule_id=rule_id,
+                rule_name=rule_name,
+                category="plugin_context",
+                severity=severity,
+                score=5 if severity == "medium" else 2,
+                title=f"{rule_name}: {plugin_name}",
+                description=(
+                    f"{plugin_name} produced {parsed_count} records in the {category} category. "
+                    "Treat this as investigation context and correlate it with process, malfind, YARA, network, command-line, and module evidence."
+                ),
+                artifact_type="plugin_results",
+                artifact_id=str(row.get("id")),
+                recommendation=(
+                    "Review this plugin output as supporting context. Do not treat it as confirmed malware without stronger correlated evidence."
+                ),
+                extra_data={
+                    "finding_intent": "investigation_artifact",
+                    "detection_confidence": "context_only",
+                    "plugin_category": category,
+                    "plugin_name": plugin_name,
+                    "cli_plugin_name": extra.get("cli_plugin_name"),
+                    "parser_strategy": extra.get("parser_strategy"),
+                    "product_purpose": extra.get("product_purpose"),
+                    "parsed_record_count": parsed_count,
+                },
+            )
+        )
+    return findings
+
+
 def finding_to_row(finding: FindingDraft, now: datetime) -> dict:
     payload = asdict(finding)
     payload["created_at"] = now
@@ -63,7 +132,8 @@ def run_detection_for_job(conn: Connection, context: dict, rules_dir: str) -> in
     scoring_config = load_risk_scoring_config(rules_dir)
     artifacts = load_job_artifacts(conn, context["analysis_job_id"])
     findings = evaluate_rules(rules, artifacts, context)
-    findings.extend(build_process_risk_summaries(findings, scoring_config))
+    findings.extend(plugin_context_findings(context, load_job_plugin_results(conn, context["analysis_job_id"])))
+    findings.extend(build_process_risk_summaries(findings, scoring_config, artifacts))
     return insert_findings(conn, findings)
 
 

@@ -7,6 +7,14 @@ import logging
 import re
 from collections.abc import Iterable
 
+from app.detection.path_reputation import known_benign_process_context, known_microsoft_appdata_path
+from app.detection.process_identity import (
+    build_process_identity_resolver,
+    display_process_identity,
+    enrich_process_extra,
+    parse_pid,
+    resolve_process_identity,
+)
 from app.detection.rules import DetectionRule, FindingDraft, applies_to_os
 from app.parsers.common import is_path_like
 
@@ -51,25 +59,48 @@ YARA_SEVERITY_SCORES = {
     "high": 8,
     "critical": 13,
 }
-DEMO_YARA_RULE_METADATA = {
-    "ramsight_demo_pe_header_in_memory_candidate": {
-        "triage_severity": "low",
-        "confidence": "candidate",
-        "noisy": True,
-        "requires_correlation": True,
-    },
-    "ramsight_demo_injection_api_cluster": {
-        "triage_severity": "medium",
-        "confidence": "candidate",
-        "noisy": False,
-        "requires_correlation": True,
-    },
-    "ramsight_demo_encoded_powershell_memory_context": {
-        "triage_severity": "medium",
-        "confidence": "candidate",
-        "noisy": False,
-        "requires_correlation": True,
-    },
+MALWARE_SPECIFIC_YARA_TERMS = {
+    "apt",
+    "backdoor",
+    "banker",
+    "botnet",
+    "c2",
+    "credential",
+    "downloader",
+    "family",
+    "infostealer",
+    "keylogger",
+    "loader",
+    "malware",
+    "mimikatz",
+    "ransomware",
+    "rat",
+    "rootkit",
+    "stealer",
+    "trojan",
+    "worm",
+}
+BROAD_YARA_TERMS = {
+    "anti-debug",
+    "debug",
+    "generic",
+    "heuristic",
+    "packer",
+    "packed",
+    "pe_header",
+    "shellcode",
+    "suspicious",
+}
+MALFIND_MEMORY_PLUGINS = {
+    "windows.malfind",
+    "windows.malware.malfind",
+    "linux.malfind",
+    "linux.malware.malfind",
+    "linux.vmayarascan",
+}
+VAD_CONTEXT_PLUGINS = {
+    "windows.vadinfo",
+    "windows.vadwalk",
 }
 
 
@@ -140,6 +171,7 @@ def command_has_encoded_powershell(command: str | None) -> bool:
 
 def evaluate_rules(rules: Iterable[DetectionRule], artifacts: dict[str, list[dict]], context: dict) -> list[FindingDraft]:
     os_family = (context.get("os_family") or "unknown").lower()
+    context = {**context, "process_identity_resolver": build_process_identity_resolver(artifacts)}
     findings: list[FindingDraft] = []
     for rule in rules:
         if not rule.enabled or not applies_to_os(rule, os_family):
@@ -210,15 +242,15 @@ def make_finding(
     )
 
 
-def process_extra(artifact: dict) -> dict:
-    return {
+def process_extra(artifact: dict, resolver: dict | None = None) -> dict:
+    return enrich_process_extra({
         "pid": artifact.get("pid"),
         "ppid": artifact.get("ppid"),
         "process_name": artifact.get("name") or artifact.get("process_name"),
         "image_path": artifact.get("image_path"),
         "command_line": artifact.get("command_line"),
         "source_plugin": artifact.get("source_plugin"),
-    }
+    }, resolver)
 
 
 def memory_region_label(artifact: dict) -> str:
@@ -249,22 +281,94 @@ def memory_region_is_executable(artifact: dict) -> bool:
     return bool(artifact.get("is_executable")) or "EXECUTE" in protection.upper()
 
 
+def memory_region_role(artifact: dict) -> str:
+    source_plugin = str(artifact.get("source_plugin") or "").lower()
+    if source_plugin in MALFIND_MEMORY_PLUGINS:
+        return "malfind_suspicious_region"
+    if source_plugin in VAD_CONTEXT_PLUGINS:
+        return "executable_vad_context" if memory_region_is_executable(artifact) else "vad_context_region"
+    return "memory_region"
+
+
 def memory_region_is_suspicious(artifact: dict) -> bool:
+    if str(artifact.get("source_plugin") or "").lower() in VAD_CONTEXT_PLUGINS:
+        return False
     return memory_region_is_executable(artifact)
 
 
-def memory_extra(artifact: dict, reason: str, linked_artifacts: dict | None = None) -> dict:
+def detection_confidence_for_intent(intent: str) -> str:
+    return {
+        "detection": "probable_malware",
+        "suspicious_triage": "suspicious",
+        "benign_context": "context_only",
+        "investigation_artifact": "context_only",
+    }.get(intent, "suspicious")
+
+
+def intent_extra(intent: str) -> dict:
+    return {"finding_intent": intent, "detection_confidence": detection_confidence_for_intent(intent)}
+
+
+def acquisition_tool_context(artifact: dict) -> dict | None:
+    values = [
+        artifact.get("name"),
+        artifact.get("process_name"),
+        artifact.get("image_path"),
+        artifact.get("command_line"),
+    ]
+    text = " ".join(str(value).lower() for value in values if value)
+    acquisition_terms = {
+        "ftk imager": "FTK Imager acquisition tooling",
+        "ftkimager": "FTK Imager acquisition tooling",
+        "dumpit": "memory acquisition tooling",
+        "winpmem": "memory acquisition tooling",
+        "magnet ram capture": "memory acquisition tooling",
+        "ram capture": "memory acquisition tooling",
+    }
+    for term, label in acquisition_terms.items():
+        if term in text:
+            return {"name": label, "reason": "process resembles forensic/acquisition tooling"}
+    return None
+
+
+def benign_process_context_for_artifact(artifact: dict, context: dict) -> dict | None:
+    resolver = context.get("process_identity_resolver") or {}
+    identity = resolve_process_identity(artifact, resolver)
+    benign = known_benign_process_context(
+        identity.process_name or artifact.get("process_name") or artifact.get("name"),
+        identity.image_path or artifact.get("image_path"),
+        identity.command_line or artifact.get("command_line"),
+        context.get("os_family"),
+    )
+    if benign is None:
+        return None
+    return {"name": benign.name, "reason": benign.reason, "category": benign.category}
+
+
+def memory_extra(artifact: dict, reason: str, linked_artifacts: dict | None = None, context: dict | None = None) -> dict:
+    resolver = (context or {}).get("process_identity_resolver") or {}
     extra = {
-        **process_extra(artifact),
+        **process_extra(artifact, resolver),
         "start_address": artifact.get("start_address"),
         "end_address": artifact.get("end_address"),
         "address_range": memory_region_label(artifact),
         "protection": artifact.get("protection"),
         "is_executable": artifact.get("is_executable"),
         "is_private": artifact.get("is_private"),
+        "memory_region_role": memory_region_role(artifact),
         "reasoning": reason,
         "requires_validation": True,
+        **intent_extra("suspicious_triage"),
     }
+    benign = benign_process_context_for_artifact(artifact, context or {})
+    if benign:
+        extra.update(
+            {
+                **intent_extra("benign_context"),
+                "benign_context": benign,
+                "reasoning": f"{reason}; downgraded as {benign['reason']} unless correlated with stronger evidence",
+            }
+        )
     if linked_artifacts:
         extra["linked_artifacts"] = linked_artifacts
     return extra
@@ -303,21 +407,74 @@ def parse_pid_candidate(value) -> int | None:
 
 
 def yara_metadata(artifact: dict) -> dict:
-    rule_name = normalize_key_text(artifact.get("rule_name")) or ""
-    metadata = dict(DEMO_YARA_RULE_METADATA.get(rule_name, {}))
+    metadata = {}
     extra_data = artifact.get("extra_data") or {}
     for nested_key in ["meta", "metadata"]:
         nested = extra_data.get(nested_key)
         if isinstance(nested, dict):
             metadata.update({str(key).lower(): value for key, value in nested.items()})
-    for key in ["severity", "triage_severity", "confidence", "noisy", "requires_correlation"]:
+    for key in [
+        "severity",
+        "triage_severity",
+        "confidence",
+        "noisy",
+        "requires_correlation",
+        "source_pack",
+        "source_repository",
+        "source_path",
+        "rule_category",
+        "category",
+        "malware_family",
+        "family",
+        "description",
+        "author",
+        "license",
+        "tags",
+    ]:
         if key in extra_data:
             metadata[key] = extra_data[key]
     return metadata
 
 
+def metadata_text(metadata: dict, artifact: dict | None = None) -> str:
+    values = [artifact.get("rule_name") if artifact else None]
+    values.extend(metadata.values())
+    parts = []
+    for value in values:
+        if isinstance(value, (list, tuple, set)):
+            parts.extend(str(item) for item in value)
+        elif isinstance(value, dict):
+            parts.extend(str(item) for item in value.values())
+        elif value is not None:
+            parts.append(str(value))
+    return " ".join(parts).lower()
+
+
+def yara_source_pack(metadata: dict) -> str | None:
+    value = metadata.get("source_pack")
+    return str(value).strip().lower() if value else None
+
+
+def yara_is_third_party(metadata: dict) -> bool:
+    return yara_source_pack(metadata) in {"elastic_yara", "neo23x0_yara", "third_party_yara_all"}
+
+
+def yara_is_malware_specific(metadata: dict, artifact: dict | None = None) -> bool:
+    family = str(metadata.get("malware_family") or metadata.get("family") or "").strip()
+    if family and family.lower() not in {"unknown", "generic", "n/a", "none"}:
+        return True
+    text = metadata_text(metadata, artifact)
+    return any(term in text for term in MALWARE_SPECIFIC_YARA_TERMS)
+
+
+def yara_is_generic_broad(metadata: dict, artifact: dict | None = None) -> bool:
+    text = metadata_text(metadata, artifact)
+    return truthy_metadata_value(metadata.get("noisy", False)) or any(term in text for term in BROAD_YARA_TERMS)
+
+
 def yara_risk_from_metadata(rule: DetectionRule, artifacts: list[dict], correlated: bool = False) -> tuple[str, int]:
     metadata = yara_metadata(artifacts[0]) if artifacts else {}
+    representative = artifacts[0] if artifacts else {}
     severity = str(metadata.get("triage_severity") or metadata.get("severity") or rule.severity).lower()
     if severity not in YARA_SEVERITY_SCORES:
         severity = rule.severity
@@ -325,9 +482,16 @@ def yara_risk_from_metadata(rule: DetectionRule, artifacts: list[dict], correlat
     confidence = str(metadata.get("confidence") or "").lower()
     noisy = truthy_metadata_value(metadata.get("noisy", False))
     requires_correlation = truthy_metadata_value(metadata.get("requires_correlation", False))
+    third_party = yara_is_third_party(metadata)
+    malware_specific = yara_is_malware_specific(metadata, representative)
+    broad_generic = yara_is_generic_broad(metadata, representative)
 
-    if severity == "critical" and confidence not in {"high", "confirmed"}:
+    if severity == "critical" and not (confidence in {"high", "confirmed"} and malware_specific):
         severity = "high"
+    if severity in {"high", "critical"} and not (malware_specific or correlated):
+        severity = "medium"
+    if broad_generic and not malware_specific and not correlated and severity in {"high", "critical"}:
+        severity = "medium"
     if requires_correlation and not correlated and severity in {"high", "critical"}:
         severity = "medium"
     if noisy and not correlated:
@@ -343,7 +507,7 @@ def yara_risk_from_metadata(rule: DetectionRule, artifacts: list[dict], correlat
 def yara_is_high_confidence(metadata: dict) -> bool:
     confidence = str(metadata.get("confidence") or "").lower()
     noisy = truthy_metadata_value(metadata.get("noisy", False))
-    return confidence in {"high", "confirmed"} and not noisy
+    return confidence in {"high", "confirmed"} and not noisy and yara_is_malware_specific(metadata)
 
 
 def yara_should_use_job_summary(metadata: dict, correlated: bool = False) -> bool:
@@ -352,6 +516,18 @@ def yara_should_use_job_summary(metadata: dict, correlated: bool = False) -> boo
     noisy = truthy_metadata_value(metadata.get("noisy", False))
     requires_correlation = truthy_metadata_value(metadata.get("requires_correlation", False))
     return noisy or (requires_correlation and not correlated)
+
+
+def yara_intent_extra(metadata: dict, artifact: dict, severity: str, correlated: bool) -> dict:
+    malware_specific = yara_is_malware_specific(metadata, artifact)
+    broad_generic = yara_is_generic_broad(metadata, artifact)
+    if severity in {"high", "critical"} and malware_specific and correlated:
+        return intent_extra("detection")
+    if severity == "critical" and malware_specific and yara_is_high_confidence(metadata):
+        return intent_extra("detection")
+    if broad_generic or not correlated:
+        return intent_extra("suspicious_triage")
+    return intent_extra("suspicious_triage")
 
 
 def display_yara_offset(artifact: dict) -> str | None:
@@ -404,11 +580,18 @@ def group_yara_matches(
     memory_by_pid: dict[int, list[dict]] | None = None,
 ) -> list[tuple[dict, list[dict], int | None, str | None, list[dict]]]:
     grouped: dict[tuple, tuple[dict, list[dict], int | None, str | None, list[dict]]] = {}
+    resolver = context.get("process_identity_resolver") or {}
     for artifact in artifacts:
-        pid = parse_pid_candidate(artifact.get("target_identifier"))
+        pid = parse_pid(artifact.get("pid") or artifact.get("target_identifier"))
+        identity = resolve_process_identity({"pid": pid, **artifact}, resolver)
         linked_regions = memory_by_pid.get(pid, []) if memory_by_pid and pid is not None else []
         region_process_name = first_yara_process_name(linked_regions)
-        process_name = region_process_name or artifact.get("process_name")
+        process_name = region_process_name or identity.process_name or artifact.get("process_name")
+        if identity.process_name or identity.image_path:
+            artifact["extra_data"] = enrich_process_extra(
+                {"target_identifier": artifact.get("target_identifier"), **(artifact.get("extra_data") or {}), "pid": pid},
+                resolver,
+            )
         key = yara_group_key(context, artifact, pid, process_name)
         if key not in grouped:
             grouped[key] = (artifact, [], pid, process_name, linked_regions)
@@ -449,7 +632,7 @@ def count_yara_affected_pids(artifacts: list[dict]) -> int:
     return len({pid for pid in values if pid is not None})
 
 
-def yara_rule_summary_extra(artifacts: list[dict]) -> dict:
+def yara_rule_summary_extra(artifacts: list[dict], severity: str = "medium", correlated: bool = False) -> dict:
     first = artifacts[0]
     metadata = yara_metadata(first)
     return {
@@ -466,6 +649,12 @@ def yara_rule_summary_extra(artifacts: list[dict]) -> dict:
         "requires_correlation": truthy_metadata_value(metadata.get("requires_correlation", False)),
         "confidence": metadata.get("confidence"),
         "triage_severity": metadata.get("triage_severity") or metadata.get("severity"),
+        "source_pack": metadata.get("source_pack"),
+        "source_repository": metadata.get("source_repository"),
+        "rule_category": metadata.get("rule_category") or metadata.get("category"),
+        "malware_family": metadata.get("malware_family") or metadata.get("family"),
+        "description": metadata.get("description"),
+        **yara_intent_extra(metadata, first, severity, correlated),
         "summary_scope": "analysis_job",
         "reasoning": "Broad YARA matches are summarized by rule to avoid repeated process-level triage noise",
         "requires_validation": True,
@@ -477,6 +666,7 @@ def yara_summary_extra(
     pid: int | None,
     process_name: str | None,
     linked_regions: list[dict] | None = None,
+    severity: str = "medium",
 ) -> dict:
     first = artifacts[0]
     metadata = yara_metadata(first)
@@ -497,6 +687,12 @@ def yara_summary_extra(
         "noisy": truthy_metadata_value(metadata.get("noisy", False)),
         "requires_correlation": truthy_metadata_value(metadata.get("requires_correlation", False)),
         "triage_severity": metadata.get("triage_severity") or metadata.get("severity"),
+        "source_pack": metadata.get("source_pack"),
+        "source_repository": metadata.get("source_repository"),
+        "rule_category": metadata.get("rule_category") or metadata.get("category"),
+        "malware_family": metadata.get("malware_family") or metadata.get("family"),
+        "description": metadata.get("description"),
+        **yara_intent_extra(metadata, first, severity, bool(linked_regions)),
         "reasoning": "YARA matches are summarized per process and rule to reduce repeated offset noise",
         "requires_validation": True,
     }
@@ -571,16 +767,37 @@ def evaluate_psscan_only_process(rule: DetectionRule, artifacts: dict[str, list[
             continue
         if artifact.get("pid") in pslist_pids:
             continue
+        extra = process_extra(artifact)
+        description = f"{process_identity(artifact)} appears in psscan but not pslist by PID; treat this as a hidden process candidate."
+        recommendation = rule.recommendation
+        acquisition_context = acquisition_tool_context(artifact)
+        if acquisition_context:
+            extra.update(
+                {
+                    "acquisition_tool_context": acquisition_context,
+                    "finding_intent": "suspicious_triage",
+                    "detection_confidence": "suspicious",
+                    "reasoning": "psscan-only process resembles forensic/acquisition tooling; validate timeline and lab acquisition context before escalating",
+                }
+            )
+            description = (
+                f"{process_identity(artifact)} appears in psscan but not pslist by PID. The process resembles "
+                f"{acquisition_context['name']}; review acquisition timeline and lab context before treating it as stealth."
+            )
+            recommendation = (
+                "Validate whether this process is part of memory acquisition or forensic tooling before escalating. "
+                "Correlate with acquisition time, operator notes, and stronger malware evidence."
+            )
         findings.append(
-            make_finding(
+            FindingDraft(**{**make_finding(
                 rule,
                 context,
                 artifact,
                 f"Hidden process candidate: {process_identity(artifact)}",
-                f"{process_identity(artifact)} appears in psscan but not pslist by PID; treat this as a hidden process candidate.",
+                description,
                 PROCESS_TABLE,
-                process_extra(artifact),
-            )
+                extra,
+            ).__dict__, "recommendation": recommendation})
         )
     return findings
 
@@ -663,6 +880,8 @@ def evaluate_suspicious_module_path(rule: DetectionRule, artifacts: dict[str, li
         module_path = artifact.get("module_path")
         if not is_path_like(module_path, os_family):
             continue
+        if known_microsoft_appdata_path(module_path, os_family):
+            continue
         normalized_path = normalize_path(module_path, os_family)
         matched = [fragment for fragment in fragments if fragment in normalized_path]
         if not matched:
@@ -707,17 +926,19 @@ def evaluate_memory_regions(rule: DetectionRule, artifacts: dict[str, list[dict]
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        findings.append(
-            make_finding(
-                rule,
-                context,
-                artifact,
-                f"Suspicious executable memory region in {process_identity(artifact)}",
-                f"A malfind-like plugin reported a suspicious executable memory region ({region_label}); this is an injection candidate and requires analyst validation.",
-                MEMORY_REGION_TABLE,
-                memory_extra(artifact, "executable memory region reported by a malfind-like plugin"),
-            )
+        extra = memory_extra(artifact, "executable memory region reported by a malfind-like plugin", context=context)
+        severity = "medium" if extra.get("finding_intent") == "benign_context" else rule.severity
+        score = min(rule.score, 5) if severity == "medium" else rule.score
+        finding = make_finding(
+            rule,
+            context,
+            artifact,
+            f"Suspicious executable memory region in {process_identity(extra)}",
+            f"A malfind-like plugin reported a suspicious executable memory region ({region_label}); this is an injection candidate and requires analyst validation.",
+            MEMORY_REGION_TABLE,
+            extra,
         )
+        findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
     return findings
 
 
@@ -741,7 +962,7 @@ def evaluate_yara_matches(rule: DetectionRule, artifacts: dict[str, list[dict]],
             f"YARA triage summary: {artifact.get('rule_name')}",
             f"YARA rule {artifact.get('rule_name')} matched {len(matches)} memory locations; this is a triage indicator requiring analyst validation and correlation.",
             YARA_TABLE,
-            yara_rule_summary_extra(matches),
+            yara_rule_summary_extra(matches, severity=severity, correlated=False),
         )
         findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
 
@@ -756,7 +977,7 @@ def evaluate_yara_matches(rule: DetectionRule, artifacts: dict[str, list[dict]],
             f"YARA match candidate: {artifact.get('rule_name')}",
             f"YARA rule {artifact.get('rule_name')} matched {title_identity}; this is a candidate signal requiring analyst validation.",
             YARA_TABLE,
-            yara_summary_extra(matches, pid, process_name, linked_regions),
+            yara_summary_extra(matches, pid, process_name, linked_regions, severity=severity),
         )
         findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
     return findings
@@ -775,17 +996,23 @@ def evaluate_memory_injection_candidates(rule: DetectionRule, artifacts: dict[st
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        findings.append(
-            make_finding(
-                rule,
-                context,
-                artifact,
-                f"Process injection candidate: {process_identity(artifact)}",
-                f"{process_identity(artifact)} has executable memory at {memory_region_label(artifact)}; this is a memory-only payload candidate and requires analyst validation.",
-                MEMORY_REGION_TABLE,
-                memory_extra(artifact, "executable/private memory region compatible with process injection candidate"),
-            )
+        extra = memory_extra(
+            artifact,
+            "executable/private memory region compatible with process injection candidate",
+            context=context,
         )
+        severity = "medium" if extra.get("finding_intent") == "benign_context" else rule.severity
+        score = min(rule.score, 5) if severity == "medium" else rule.score
+        finding = make_finding(
+            rule,
+            context,
+            artifact,
+            f"Process injection candidate: {process_identity(extra)}",
+            f"{process_identity(extra)} has executable memory at {memory_region_label(artifact)}; this is a memory-only payload candidate and requires analyst validation.",
+            MEMORY_REGION_TABLE,
+            extra,
+        )
+        findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
     return findings
 
 
@@ -808,25 +1035,28 @@ def evaluate_memory_network_correlation(rule: DetectionRule, artifacts: dict[str
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
+            extra = memory_extra(
+                region,
+                "executable memory region correlated with public remote network activity by PID",
+                {
+                    "memory_region_artifact_id": str(region.get("id")),
+                    "network_artifact_id": str(network.get("id")),
+                    "remote_address": remote_address,
+                    "remote_port": network.get("remote_port"),
+                    "network_source_plugin": network.get("source_plugin"),
+                },
+                context=context,
+            )
+            extra.update(intent_extra("detection"))
             findings.append(
                 make_finding(
                     rule,
                     context,
                     region,
-                    f"Executable memory region with network activity: {process_identity(region)}",
-                    f"{process_identity(region)} has suspicious executable memory and a public remote network connection; this is a candidate requiring validation.",
+                    f"Executable memory region with network activity: {process_identity(extra)}",
+                    f"{process_identity(extra)} has suspicious executable memory and a public remote network connection; this is a candidate requiring validation.",
                     MEMORY_REGION_TABLE,
-                    memory_extra(
-                        region,
-                        "executable memory region correlated with public remote network activity by PID",
-                        {
-                            "memory_region_artifact_id": str(region.get("id")),
-                            "network_artifact_id": str(network.get("id")),
-                            "remote_address": remote_address,
-                            "remote_port": network.get("remote_port"),
-                            "network_source_plugin": network.get("source_plugin"),
-                        },
-                    ),
+                    extra,
                 )
             )
     return findings
@@ -854,24 +1084,27 @@ def evaluate_memory_command_correlation(rule: DetectionRule, artifacts: dict[str
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
+            extra = memory_extra(
+                region,
+                f"executable memory region correlated with {reason}",
+                {
+                    "memory_region_artifact_id": str(region.get("id")),
+                    "command_artifact_id": str(command.get("id")),
+                    "command_excerpt": str(command.get("command") or "")[:500],
+                    "command_source_plugin": command.get("source_plugin"),
+                },
+                context=context,
+            )
+            extra.update(intent_extra("detection"))
             findings.append(
                 make_finding(
                     rule,
                     context,
                     region,
-                    f"Executable memory region with suspicious command line: {process_identity(region)}",
-                    f"{process_identity(region)} has suspicious executable memory and command-line evidence ({reason}); this is a candidate requiring validation.",
+                    f"Executable memory region with suspicious command line: {process_identity(extra)}",
+                    f"{process_identity(extra)} has suspicious executable memory and command-line evidence ({reason}); this is a candidate requiring validation.",
                     MEMORY_REGION_TABLE,
-                    memory_extra(
-                        region,
-                        f"executable memory region correlated with {reason}",
-                        {
-                            "memory_region_artifact_id": str(region.get("id")),
-                            "command_artifact_id": str(command.get("id")),
-                            "command_excerpt": str(command.get("command") or "")[:500],
-                            "command_source_plugin": command.get("source_plugin"),
-                        },
-                    ),
+                    extra,
                 )
             )
     return findings
@@ -894,32 +1127,57 @@ def evaluate_memory_module_correlation(rule: DetectionRule, artifacts: dict[str,
             matched = [fragment for fragment in fragments if fragment in normalized_path]
             if not matched:
                 continue
-            dedupe_key = process_memory_key(context, rule, region, normalized_path)
+            reputation = known_microsoft_appdata_path(module_path, os_family)
+            module_key = reputation.normalized_root if reputation else normalized_path
+            dedupe_key = process_memory_key(context, rule, region, module_key)
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
-            findings.append(
-                make_finding(
-                    rule,
-                    context,
-                    region,
-                    f"Executable memory region with suspicious module path: {process_identity(region)}",
-                    f"{process_identity(region)} has suspicious executable memory and a module mapped from a user-writable path; this requires analyst validation.",
-                    MEMORY_REGION_TABLE,
-                    memory_extra(
-                        region,
-                        "executable memory region correlated with suspicious/user-writable module path by PID",
-                        {
-                            "memory_region_artifact_id": str(region.get("id")),
-                            "module_artifact_id": str(module.get("id")),
-                            "module_name": module.get("module_name"),
-                            "module_path": module_path,
-                            "matched_path_fragments": matched,
-                            "module_source_plugin": module.get("source_plugin"),
-                        },
-                    ),
-                )
+            linked_artifacts = {
+                "memory_region_artifact_id": str(region.get("id")),
+                "module_artifact_id": str(module.get("id")),
+                "module_name": module.get("module_name"),
+                "module_path": module_path,
+                "matched_path_fragments": matched,
+                "module_source_plugin": module.get("source_plugin"),
+            }
+            title = f"Executable memory region with suspicious module path: {process_identity(region)}"
+            description = (
+                f"{process_identity(region)} has suspicious executable memory and a module mapped from a user-writable path; "
+                "this requires analyst validation."
             )
+            reason = "executable memory region correlated with suspicious/user-writable module path by PID"
+            severity = rule.severity
+            score = rule.score
+            if reputation:
+                linked_artifacts.update(
+                    {
+                        "known_microsoft_appdata_module": True,
+                        "module_app_name": reputation.app_name,
+                        "module_app_root": reputation.normalized_root,
+                        "module_context_only": True,
+                    }
+                )
+                title = f"Executable memory region with Microsoft AppData module context: {process_identity(region)}"
+                description = (
+                    f"{process_identity(region)} has suspicious executable memory and a module loaded from a known Microsoft "
+                    "AppData application path; treat the module path as supporting context that requires validation."
+                )
+                reason = "executable memory region correlated with known Microsoft AppData module context by PID"
+                severity = "medium"
+                score = min(rule.score, 5)
+            extra = memory_extra(region, reason, linked_artifacts, context=context)
+            extra.update(intent_extra("benign_context" if reputation else "suspicious_triage"))
+            finding = make_finding(
+                rule,
+                context,
+                region,
+                title,
+                description,
+                MEMORY_REGION_TABLE,
+                extra,
+            )
+            findings.append(FindingDraft(**{**finding.__dict__, "severity": severity, "score": score}))
     return findings
 
 
@@ -949,7 +1207,7 @@ def evaluate_yara_process_memory(rule: DetectionRule, artifacts: dict[str, list[
                 f"YARA match in process memory: {title_identity}",
                 f"YARA rule {yara_match.get('rule_name')} matched process memory for {title_identity}; this is suspicious and requires analyst validation.",
                 YARA_TABLE,
-                yara_summary_extra(matches, pid, process_name, linked_regions),
+                yara_summary_extra(matches, pid, process_name, linked_regions, severity=severity),
             ).__dict__, "severity": severity, "score": score})
         )
     return findings
