@@ -22,6 +22,12 @@ YARA_REPRESENTATIVE_LIMIT = 5
 ERROR_SUMMARY_LIMIT = 180
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 YARA_PLUGIN_NAMES = {"windows.vadyarascan", "yarascan", "linux.vmayarascan"}
+YARA_PROFILE_NAMES = {
+    "windows_memory_yara",
+    "windows_memory_yara_elastic",
+    "windows_memory_yara_neo23x0",
+    "windows_memory_yara_third_party_all",
+}
 PATH_LIKE_RE = re.compile(r"((?:/[^\s:;'\"]+){2,}|[A-Za-z]:\\[^\s:;'\"]+)")
 PID_RE = re.compile(r"\b(?:pid\s*)?(\d+)\b", re.IGNORECASE)
 
@@ -497,7 +503,7 @@ def build_yara_status(analysis_job: dict, plugin_results: list[dict], yara_match
     plugin_profile = str(analysis_job.get("plugin_profile") or "").strip().lower()
 
     if not yara_plugins:
-        status = "unavailable" if plugin_profile == "windows_memory_yara" else "not_selected"
+        status = "unavailable" if plugin_profile in YARA_PROFILE_NAMES else "not_selected"
         return {"selected": status != "not_selected", "status": status, "message": _yara_status_message(status)}
 
     timed_out = next((plugin for plugin in yara_plugins if str(plugin.get("status") or "").lower() == "failed" and _is_timeout(plugin)), None)
@@ -569,6 +575,16 @@ def _finding_context_parts(finding: dict) -> list[str]:
         parts.append(f"PID {pid}")
     if process_name:
         parts.append(process_name)
+    image_path = extra.get("image_path")
+    if image_path:
+        parts.append(f"path {image_path}")
+    command_line = extra.get("command_line")
+    if command_line:
+        parts.append(f"cmd {str(command_line)[:180]}")
+    parent_pid = extra.get("ppid")
+    parent_name = extra.get("parent_process_name")
+    if parent_pid is not None or parent_name:
+        parts.append(f"parent {_process_identity(parent_name, parent_pid)}")
     address_range = extra.get("address_range") or _address_range(extra) or _address_range(linked)
     if address_range:
         parts.append(f"region {address_range}")
@@ -596,6 +612,7 @@ def _address_range(row: dict) -> str | None:
 
 def display_finding_row(finding: dict) -> dict:
     pid, process_name = _finding_pid_process(finding)
+    extra = _extra_data(finding)
     return {
         "rule": _text(finding.get("rule_name") or finding.get("title")),
         "title": _text(finding.get("title") or finding.get("rule_name")),
@@ -605,6 +622,10 @@ def display_finding_row(finding: dict) -> dict:
         "source_plugin": _text(finding.get("source_plugin")),
         "pid": _text(pid),
         "process_name": _text(process_name),
+        "image_path": _text(extra.get("image_path"), "Not recorded"),
+        "command_line": _text(extra.get("command_line"), ""),
+        "evidence_groups": _list_values(extra.get("evidence_groups")),
+        "detection_confidence": _text(extra.get("detection_confidence") or extra.get("finding_intent"), "suspicious"),
         "context_parts": _finding_context_parts(finding),
         "recommendation": _text(finding.get("recommendation"), "Review with surrounding forensic context."),
     }
@@ -613,6 +634,16 @@ def display_finding_row(finding: dict) -> dict:
 def _display_finding_key(finding: dict) -> tuple:
     extra = _extra_data(finding)
     pid, process_name = _finding_pid_process(finding)
+    if finding.get("category") == "process_risk_summary":
+        return ("process_risk_summary", pid, str(process_name or "").lower())
+    if finding.get("artifact_type") == "memory_region_artifacts":
+        return (
+            finding.get("rule_id") or finding.get("rule_name"),
+            pid,
+            str(process_name or "").lower(),
+            finding.get("artifact_type"),
+            finding.get("category"),
+        )
     return (
         finding.get("rule_id") or finding.get("rule_name"),
         pid,
@@ -628,8 +659,14 @@ def build_display_top_findings(findings: list[dict], limit: int = TOP_FINDINGS_L
     selected = []
     seen = set()
     omitted = 0
-    display_candidates = [finding for finding in findings if finding.get("category") != "process_risk_summary"]
-    for finding in sorted(display_candidates, key=finding_sort_key, reverse=True):
+    process_candidates = [finding for finding in findings if finding.get("category") == "process_risk_summary"]
+    other_candidates = [finding for finding in findings if finding.get("category") != "process_risk_summary"]
+    if process_candidates:
+        display_candidates = sorted(process_candidates, key=finding_sort_key, reverse=True)
+        omitted += len(other_candidates)
+    else:
+        display_candidates = sorted(other_candidates, key=finding_sort_key, reverse=True)
+    for finding in display_candidates:
         key = _display_finding_key(finding)
         if key in seen or len(selected) >= limit:
             omitted += 1
@@ -815,9 +852,24 @@ def build_memory_evidence_chains(process_groups: list[dict], artifacts: dict[str
     return chains
 
 
-def build_ioc_summary(iocs: list[dict]) -> list[dict]:
+def _ioc_role(ioc: dict) -> str:
+    extra = _extra_data(ioc)
+    explicit = _raw_text(extra.get("ioc_role"))
+    if explicit:
+        return explicit
+    ioc_type = _raw_text(ioc.get("ioc_type")) or ""
+    if ioc_type in {"pid", "process_name", "memory_region", "plugin_reference"}:
+        return "investigation_artifact"
+    if ioc_type == "yara_rule":
+        return "investigation_artifact"
+    return "threat_ioc"
+
+
+def build_ioc_summary(iocs: list[dict], role: str | None = None) -> list[dict]:
     grouped: dict[str, dict] = {}
     for ioc in iocs:
+        if role and _ioc_role(ioc) != role:
+            continue
         ioc_type = _text(ioc.get("ioc_type"), "unknown")
         bucket = grouped.setdefault(
             ioc_type,
@@ -856,12 +908,35 @@ def build_yara_summary(yara_matches: list[dict]) -> list[dict]:
     grouped: dict[tuple, dict] = {}
     for match in yara_matches:
         rule_name = _text(match.get("rule_name"), "Unknown rule")
-        key = (rule_name, match.get("source_plugin"))
+        extra = _extra_data(match)
+        source_pack = _raw_text(extra.get("source_pack"))
+        rule_category = _raw_text(extra.get("rule_category") or extra.get("category"))
+        malware_family = _raw_text(extra.get("malware_family") or extra.get("family"))
+        description = _raw_text(extra.get("description"))
+        key = (rule_name, match.get("source_plugin"), source_pack)
         bucket = grouped.setdefault(
             key,
-            {"rule_name": rule_name, "match_count": 0, "targets": [], "sample_offsets": [], "source_plugins": set()},
+            {
+                "rule_name": rule_name,
+                "match_count": 0,
+                "targets": [],
+                "sample_offsets": [],
+                "source_plugins": set(),
+                "source_packs": set(),
+                "rule_categories": set(),
+                "malware_families": set(),
+                "descriptions": [],
+            },
         )
         bucket["match_count"] += 1
+        if source_pack:
+            bucket["source_packs"].add(source_pack)
+        if rule_category:
+            bucket["rule_categories"].add(rule_category)
+        if malware_family:
+            bucket["malware_families"].add(malware_family)
+        if description and description not in bucket["descriptions"] and len(bucket["descriptions"]) < 2:
+            bucket["descriptions"].append(description)
         target = _raw_text(match.get("target_identifier"))
         if target and target not in bucket["targets"] and len(bucket["targets"]) < YARA_REPRESENTATIVE_LIMIT:
             bucket["targets"].append(target)
@@ -873,7 +948,15 @@ def build_yara_summary(yara_matches: list[dict]) -> list[dict]:
             bucket["source_plugins"].add(source_plugin)
     rows = []
     for bucket in grouped.values():
-        rows.append({**bucket, "source_plugins": sorted(bucket["source_plugins"])})
+        rows.append(
+            {
+                **bucket,
+                "source_plugins": sorted(bucket["source_plugins"]),
+                "source_packs": sorted(bucket["source_packs"]),
+                "rule_categories": sorted(bucket["rule_categories"]),
+                "malware_families": sorted(bucket["malware_families"]),
+            }
+        )
     return sorted(rows, key=lambda row: (-row["match_count"], row["rule_name"]))
 
 
@@ -947,6 +1030,8 @@ def build_report_context(
         "yara_summary": build_yara_summary(yara_matches_limited),
         "iocs": limited(iocs, 100),
         "ioc_summary": build_ioc_summary(iocs),
+        "threat_ioc_summary": build_ioc_summary(iocs, role="threat_ioc"),
+        "investigation_artifact_summary": build_ioc_summary(iocs, role="investigation_artifact"),
         "ioc_export_note": "Full IOC JSON and CSV exports are available separately when generated for this analysis job.",
         "analyst_notes": limited(analyst_notes or [], 20),
         "generated_at": generated_at or utc_now(),

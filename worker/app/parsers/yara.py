@@ -43,6 +43,21 @@ def parse_yara_matches(rows: list[dict], source_plugin: str) -> ParsedArtifactBa
             extra_data["offset_raw"] = offset_raw
         if offset_error:
             extra_data["offset_parse_error"] = offset_error
+        for key in [
+            "source_pack",
+            "source_repository",
+            "rule_category",
+            "malware_family",
+            "description",
+            "severity",
+            "triage_severity",
+            "confidence",
+            "metadata",
+            "meta",
+        ]:
+            value = first_value(row, [key])
+            if value is not None and key not in extra_data:
+                extra_data[key] = value
         records.append(
             {
                 "rule_name": rule_name,

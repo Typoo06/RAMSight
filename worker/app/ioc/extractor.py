@@ -64,7 +64,7 @@ def extract_iocs(artifacts: dict[str, list[dict]], risk_findings: list[dict], co
     iocs.extend(extract_command_iocs(artifacts.get(COMMAND_TABLE, []), risk_index, context))
     iocs.extend(extract_module_iocs(artifacts.get(MODULE_TABLE, []), risk_index, context))
     iocs.extend(extract_process_iocs(artifacts.get(PROCESS_TABLE, []), risk_index, context))
-    iocs.extend(extract_yara_iocs(artifacts.get(YARA_TABLE, []), context))
+    iocs.extend(extract_yara_iocs(artifacts.get(YARA_TABLE, []), risk_index, context))
     iocs.extend(extract_memory_region_iocs(artifacts.get(MEMORY_REGION_TABLE, []), risk_index, context))
     iocs.extend(extract_plugin_reference_iocs(risk_findings, context))
     return deduplicate_iocs(iocs)
@@ -206,6 +206,7 @@ def extract_network_iocs(rows: list[dict], risk_index: dict[tuple[str, str], lis
 
 def network_extra(row: dict, severity: str, matched_reason: str) -> dict:
     return {
+        "ioc_role": "threat_ioc",
         "severity": severity,
         "matched_reason": matched_reason,
         "protocol": row.get("protocol"),
@@ -249,6 +250,7 @@ def extract_command_iocs(rows: list[dict], risk_index: dict[tuple[str, str], lis
                 confidence_for_severity(severity, 80),
                 reason or "linked risk finding",
                 {
+                    "ioc_role": "threat_ioc",
                     "severity": severity,
                     "matched_reason": reason or "linked risk finding",
                     "pid": row.get("pid"),
@@ -289,6 +291,7 @@ def extract_module_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list
         severity = severity_from_findings(findings, "medium")
         matched_reason = reason or "linked risk finding"
         extra_data = {
+            "ioc_role": "threat_ioc" if not reputation else "investigation_artifact",
             "severity": severity,
             "matched_reason": matched_reason,
             "module_name": row.get("module_name"),
@@ -389,6 +392,7 @@ def memory_region_value(row: dict, index: int) -> str:
 
 def process_extra(row: dict, severity: str, matched_reason: str) -> dict:
     return {
+        "ioc_role": "investigation_artifact",
         "severity": severity,
         "matched_reason": matched_reason,
         "pid": row.get("pid"),
@@ -399,11 +403,85 @@ def process_extra(row: dict, severity: str, matched_reason: str) -> dict:
     }
 
 
-def extract_yara_iocs(rows: list[dict], context: dict) -> list[IOCRecordDraft]:
+def metadata_text(metadata: dict, row: dict | None = None) -> str:
+    values = [row.get("rule_name") if row else None]
+    values.extend(metadata.values())
+    parts: list[str] = []
+    for value in values:
+        if isinstance(value, (list, tuple, set)):
+            parts.extend(str(item) for item in value)
+        elif isinstance(value, dict):
+            parts.extend(str(item) for item in value.values())
+        elif value is not None:
+            parts.append(str(value))
+    return " ".join(parts).lower()
+
+
+def yara_is_malware_specific(row: dict) -> bool:
+    metadata = row.get("extra_data") or {}
+    family = str(metadata.get("malware_family") or metadata.get("family") or "").lower()
+    category = str(metadata.get("rule_category") or metadata.get("category") or "").lower()
+    description = str(metadata.get("description") or "").lower()
+    rule_name = str(row.get("rule_name") or "").lower()
+    text = " ".join([family, category, description, rule_name])
+    if family and family not in {"generic", "unknown", "n/a", "none"}:
+        return True
+    if any(term in text for term in ["cobalt", "beacon", "malware", "trojan", "loader", "backdoor", "ransom", "mimikatz"]):
+        return True
+    return False
+
+
+def yara_is_cross_platform_mismatch(row: dict, context: dict) -> bool:
+    if str(context.get("os_family") or "").lower() != "windows":
+        return False
+    metadata = row.get("extra_data") or {}
+    text = metadata_text(metadata, row)
+    mismatch_terms = [
+        "linux",
+        "elf",
+        "mach-o",
+        "macho",
+        "macos",
+        "osx",
+        "darwin",
+        "android",
+    ]
+    windows_terms = ["windows", "win_", "win32", "win64", "pe32", "powershell", "cobaltstrike"]
+    return any(term in text for term in mismatch_terms) and not any(term in text for term in windows_terms)
+
+
+def yara_has_correlation(findings: list[dict]) -> bool:
+    for finding in findings:
+        extra = finding.get("extra_data") or {}
+        if extra.get("linked_memory_region_artifact_ids"):
+            return True
+        groups = extra.get("evidence_groups") or []
+        if isinstance(groups, list) and any(group in groups for group in ["memory_region", "network_endpoint", "suspicious_command", "suspicious_module"]):
+            return True
+        confidence = str(extra.get("detection_confidence") or "").lower()
+        if confidence == "probable_malware":
+            return True
+    return False
+
+
+def yara_ioc_role(row: dict, findings: list[dict], context: dict) -> str:
+    if yara_is_cross_platform_mismatch(row, context):
+        return "investigation_artifact"
+    if yara_is_malware_specific(row) and yara_has_correlation(findings):
+        return "threat_ioc"
+    return "investigation_artifact"
+
+
+def extract_yara_iocs(rows: list[dict], risk_index: dict[tuple[str, str], list[dict]], context: dict) -> list[IOCRecordDraft]:
     iocs = []
     for row in rows:
         metadata = row.get("extra_data") or {}
         severity = str(metadata.get("severity") or "high").lower()
+        findings = linked_findings(risk_index, YARA_TABLE, row)
+        role = yara_ioc_role(row, findings, context)
+        confidence = confidence_for_severity(severity, 85)
+        if role != "threat_ioc":
+            confidence = min(confidence, 55)
         append_if_present(
             iocs,
             make_ioc(
@@ -411,10 +489,14 @@ def extract_yara_iocs(rows: list[dict], context: dict) -> list[IOCRecordDraft]:
                 IOC_YARA_RULE,
                 row.get("rule_name"),
                 row.get("source_plugin"),
-                confidence_for_severity(severity, 85),
-                "YARA rule matched memory content",
+                confidence,
+                "YARA rule matched memory content; role reflects rule specificity and correlation strength",
                 {
+                    "ioc_role": role,
                     "severity": severity,
+                    "malware_specific": yara_is_malware_specific(row),
+                    "correlated": yara_has_correlation(findings),
+                    "cross_platform_mismatch": yara_is_cross_platform_mismatch(row, context),
                     "namespace": row.get("namespace"),
                     "tags": row.get("tags"),
                     "target_identifier": row.get("target_identifier"),
@@ -447,6 +529,7 @@ def extract_memory_region_iocs(rows: list[dict], risk_index: dict[tuple[str, str
                 confidence_for_severity(severity, 80),
                 "suspicious memory region",
                 {
+                    "ioc_role": "investigation_artifact",
                     "severity": severity,
                     "matched_reason": "suspicious memory region",
                     "pid": row.get("pid"),
@@ -482,6 +565,7 @@ def extract_plugin_reference_iocs(risk_findings: list[dict], context: dict) -> l
                 min(confidence_for_severity(severity, 45), 60),
                 "plugin source reference from concrete risk finding",
                 {
+                    "ioc_role": "investigation_artifact",
                     "severity": severity,
                     "rule_id": finding.get("rule_id"),
                     "rule_name": finding.get("rule_name"),

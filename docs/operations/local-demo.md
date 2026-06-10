@@ -97,7 +97,7 @@ On WSL/Docker Desktop, monitor disk and memory pressure during upload and analys
 
 Use browser chunked upload for large memory dumps. The direct multipart upload endpoint is capped by `EVIDENCE_DIRECT_UPLOAD_MAX_BYTES` so an accidental large direct upload fails early instead of filling temporary disk space.
 
-For the thesis defense demo, choose the `windows_memory_yara` analysis profile. It runs the Windows Volatility triage plugins plus process-memory YARA scanning, which better supports the memory-only malware topic. The generated report is HTML; PDF export is not implemented in the current demo build.
+For the thesis defense demo, choose the `windows_memory_yara_elastic` analysis profile. It runs the Windows Volatility triage plugins plus the validated Elastic third-party YARA pack for process-memory scanning. The generated report is HTML; PDF export is not implemented in the current demo build.
 
 
 ## Test and Build Commands

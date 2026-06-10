@@ -63,7 +63,7 @@ def run_detection_for_job(conn: Connection, context: dict, rules_dir: str) -> in
     scoring_config = load_risk_scoring_config(rules_dir)
     artifacts = load_job_artifacts(conn, context["analysis_job_id"])
     findings = evaluate_rules(rules, artifacts, context)
-    findings.extend(build_process_risk_summaries(findings, scoring_config))
+    findings.extend(build_process_risk_summaries(findings, scoring_config, artifacts))
     return insert_findings(conn, findings)
 
 

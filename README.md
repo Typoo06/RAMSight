@@ -35,7 +35,7 @@ Check local readiness:
 python scripts/demo/preflight_check.py --api-base http://localhost:8000/api/v1 --frontend-url http://localhost:5173
 ```
 
-For the memory-only malware defense demo, use the `windows_memory_yara` analysis profile when starting a Windows memory job. It runs the standard Volatility triage plugins plus process-memory YARA scanning. The faster `windows_default` profile is still available when YARA scan time is not acceptable.
+For the memory-only malware defense demo, use the `windows_memory_yara_elastic` analysis profile when starting a Windows memory job. It runs the standard Volatility triage plugins plus process-memory YARA scanning with the validated Elastic third-party pack. The legacy `windows_memory_yara` profile remains a backward-compatible alias for Elastic YARA; it does not use the archived RAMSight demo rules. The faster `windows_default` profile is still available when YARA scan time is not acceptable.
 
 Run a strict preflight against the known local demo job, if that job exists in your database:
 
@@ -78,6 +78,7 @@ Start here for local demo and submission workflows:
 - [Local demo and thesis defense runbook](docs/demo/local-defense-runbook.md)
 - [Large evidence browser upload notes](docs/validation/large-evidence-browser-upload.md)
 - [YARA rule guide](docs/YARA_RULES.md)
+- [Third-party rule pack guide](docs/rules/THIRD_PARTY_RULES.md)
 - [Developer setup](docs/developer-guide/dev-setup.md)
 
 ## Safety Rules

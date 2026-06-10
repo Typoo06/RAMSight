@@ -139,11 +139,11 @@ def test_html_report_renders_process_summary_without_raw_dict_text() -> None:
     assert "Executive Summary" in html
     assert "Plugin Results" in html
     assert "Memory-only Evidence Chains" in html
-    assert "Critical risk process: WinRAR.exe" not in html
+    assert "Critical risk process: WinRAR.exe" in html
     assert "WinRAR.exe (PID 2924)" in html
     assert "memory_region" in html
     assert "YARA scanning completed and YARA match artifacts are summarized below." in html
-    assert "Demo YARA rules are triage aids" in html
+    assert "Third-party YARA rules are defensive triage aids" in html
     assert "{&#39;pid&#39;" not in html
     assert "{'pid':" not in html
 
@@ -264,7 +264,8 @@ def test_html_report_renders_capped_artifact_sections_with_context_notes() -> No
 
     assert "Executive Summary" in html
     assert "Memory-only Evidence Chains" in html
-    assert "IOC Summary" in html
+    assert "Threat-Oriented IOCs" in html
+    assert "Investigation Artifacts" in html
     assert "This table is capped for readability" in html
     assert "Showing 2 of 5 network artifacts. 3 rows were omitted" in html
     assert "Public remote endpoint" in html

@@ -1,10 +1,11 @@
 import { FormEvent, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  cancelEvidenceUpload,
-  completeEvidenceUpload,
-  initiateEvidenceUpload,
-  uploadEvidenceChunk,
+  cancelMultipartEvidenceUpload,
+  completeMultipartEvidenceUpload,
+  initiateMultipartEvidenceUpload,
+  presignMultipartEvidencePart,
+  recordMultipartEvidencePart,
 } from "../api/evidences";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -12,7 +13,8 @@ import { ErrorState } from "../components/ui/ErrorState";
 import type { OSFamily } from "../types/domain";
 
 const ALLOWED_EXTENSIONS = [".raw", ".mem", ".vmem", ".dmp", ".lime"];
-const MAX_CHUNK_RETRIES = 2;
+const MAX_PART_RETRIES = 2;
+const MULTIPART_UPLOAD_CONCURRENCY = 2;
 
 type UploadStatus = "idle" | "preparing" | "uploading" | "finalizing" | "completed" | "failed" | "cancelled";
 
@@ -52,12 +54,52 @@ function progressPercent(progress: UploadProgress | null): number {
   return Math.min(100, Math.round((progress.uploadedBytes / progress.totalBytes) * 100));
 }
 
+function uploadPartToPresignedUrl(
+  uploadUrl: string,
+  part: Blob,
+  activeXhrs: Set<XMLHttpRequest>,
+  onProgress: (loadedBytes: number) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    activeXhrs.add(xhr);
+
+    xhr.open("PUT", uploadUrl);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded);
+    };
+    xhr.onload = () => {
+      activeXhrs.delete(xhr);
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error("Object storage rejected an evidence upload part."));
+        return;
+      }
+      const etag = xhr.getResponseHeader("ETag");
+      if (!etag) {
+        reject(new Error("Object storage did not return an ETag for this upload part. Check MinIO CORS ExposeHeaders."));
+        return;
+      }
+      onProgress(part.size);
+      resolve(etag);
+    };
+    xhr.onerror = () => {
+      activeXhrs.delete(xhr);
+      reject(new Error("Object storage could not receive an evidence upload part."));
+    };
+    xhr.onabort = () => {
+      activeXhrs.delete(xhr);
+      reject(new Error("Evidence upload was cancelled."));
+    };
+    xhr.send(part);
+  });
+}
+
 export function EvidenceUploadPage() {
   const { caseId } = useParams();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeUploadIdRef = useRef<string | null>(null);
-  const activeControllerRef = useRef<AbortController | null>(null);
+  const activeXhrsRef = useRef<Set<XMLHttpRequest>>(new Set());
   const cancelRequestedRef = useRef(false);
   const [acquisitionTime, setAcquisitionTime] = useState("");
   const [acquisitionTool, setAcquisitionTool] = useState("");
@@ -87,30 +129,34 @@ export function EvidenceUploadPage() {
     setError(null);
   }
 
-  async function uploadChunkWithRetry(uploadId: string, chunkIndex: number, chunk: Blob): Promise<number> {
+  async function uploadPartWithRetry(
+    sessionId: string,
+    partNumber: number,
+    part: Blob,
+    onProgress: (loadedBytes: number) => void,
+  ): Promise<number> {
     let lastError: unknown = null;
-    for (let attempt = 0; attempt <= MAX_CHUNK_RETRIES; attempt += 1) {
+    for (let attempt = 0; attempt <= MAX_PART_RETRIES; attempt += 1) {
       if (cancelRequestedRef.current) throw new Error("Evidence upload was cancelled.");
-      const controller = new AbortController();
-      activeControllerRef.current = controller;
       try {
-        const result = await uploadEvidenceChunk(uploadId, chunkIndex, chunk, controller.signal);
-        activeControllerRef.current = null;
-        return result.uploaded_bytes;
+        const presigned = await presignMultipartEvidencePart(sessionId, partNumber);
+        const etag = await uploadPartToPresignedUrl(presigned.upload_url, part, activeXhrsRef.current, onProgress);
+        await recordMultipartEvidencePart(sessionId, partNumber, etag, part.size);
+        return part.size;
       } catch (err) {
-        activeControllerRef.current = null;
         lastError = err;
+        onProgress(0);
         if (cancelRequestedRef.current) throw new Error("Evidence upload was cancelled.", { cause: err });
-        if (attempt >= MAX_CHUNK_RETRIES) break;
+        if (attempt >= MAX_PART_RETRIES) break;
         setUploadProgress((current) => current
-          ? { ...current, message: `Retrying chunk ${chunkIndex + 1} after a network error...` }
+          ? { ...current, message: `Retrying part ${partNumber} after an upload error...` }
           : current);
       }
     }
     if (lastError instanceof Error) {
       throw new Error(lastError.message, { cause: lastError });
     }
-    throw new Error("RAMSight could not upload an evidence chunk.", { cause: lastError });
+    throw new Error("RAMSight could not upload an evidence part.", { cause: lastError });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -125,7 +171,8 @@ export function EvidenceUploadPage() {
       setError("Choose a memory dump before uploading evidence.");
       return;
     }
-    if (!hasAllowedExtension(file.name)) {
+    const selectedFile = file;
+    if (!hasAllowedExtension(selectedFile.name)) {
       setError(`RAMSight accepts memory dumps with these extensions: ${ALLOWED_EXTENSIONS.join(", ")}.`);
       return;
     }
@@ -134,20 +181,22 @@ export function EvidenceUploadPage() {
     setError(null);
     cancelRequestedRef.current = false;
     activeUploadIdRef.current = null;
+    activeXhrsRef.current.clear();
     setUploadProgress({
       status: "preparing",
       uploadedBytes: 0,
-      totalBytes: file.size,
+      totalBytes: selectedFile.size,
       uploadedChunks: 0,
       totalChunks: 0,
-      message: "Preparing RAMSight chunked upload session...",
+      message: "Preparing RAMSight direct multipart upload...",
     });
 
     try {
-      const session = await initiateEvidenceUpload({
+      const session = await initiateMultipartEvidenceUpload({
         case_id: caseId,
-        original_filename: file.name,
-        size_bytes: file.size,
+        filename: selectedFile.name,
+        size_bytes: selectedFile.size,
+        content_type: selectedFile.type || "application/octet-stream",
         os_family: osFamily || "windows",
         os_version: optionalValue(osVersion),
         architecture: optionalValue(architecture),
@@ -156,43 +205,83 @@ export function EvidenceUploadPage() {
         acquisition_tool: optionalValue(acquisitionTool),
         acquisition_time: acquisitionTime ? new Date(acquisitionTime).toISOString() : null,
       });
-      activeUploadIdRef.current = session.upload_id;
-      setUploadProgress({
-        status: "uploading",
-        uploadedBytes: 0,
-        totalBytes: file.size,
-        uploadedChunks: 0,
-        totalChunks: session.total_chunks,
-        message: "Uploading evidence chunks...",
-      });
+      activeUploadIdRef.current = session.upload_session_id;
 
-      for (let chunkIndex = 0; chunkIndex < session.total_chunks; chunkIndex += 1) {
-        if (cancelRequestedRef.current) throw new Error("Evidence upload was cancelled.");
-        const start = chunkIndex * session.chunk_size;
-        const end = Math.min(start + session.chunk_size, file.size);
-        const chunk = file.slice(start, end);
-        const uploadedBytes = await uploadChunkWithRetry(session.upload_id, chunkIndex, chunk);
+      const partSize = session.recommended_part_size_bytes;
+      const totalParts = session.expected_part_count;
+      let nextPartNumber = 1;
+      let completedParts = 0;
+      let completedBytes = 0;
+      const inFlightProgress = new Map<number, number>();
+
+      function currentUploadedBytes(): number {
+        return completedBytes + [...inFlightProgress.values()].reduce((total, value) => total + value, 0);
+      }
+
+      function setPartProgress(partNumber: number, loadedBytes: number) {
+        if (loadedBytes <= 0) inFlightProgress.delete(partNumber);
+        else inFlightProgress.set(partNumber, loadedBytes);
         setUploadProgress({
           status: "uploading",
-          uploadedBytes,
-          totalBytes: file.size,
-          uploadedChunks: chunkIndex + 1,
-          totalChunks: session.total_chunks,
-          message: "Uploading evidence chunks...",
+          uploadedBytes: Math.min(currentUploadedBytes(), selectedFile.size),
+          totalBytes: selectedFile.size,
+          uploadedChunks: completedParts,
+          totalChunks: totalParts,
+          message: "Uploading evidence parts directly to object storage...",
         });
       }
 
+      setUploadProgress({
+        status: "uploading",
+        uploadedBytes: 0,
+        totalBytes: selectedFile.size,
+        uploadedChunks: 0,
+        totalChunks: totalParts,
+        message: "Uploading evidence parts directly to object storage...",
+      });
+
+      async function worker() {
+        while (!cancelRequestedRef.current) {
+          const partNumber = nextPartNumber;
+          nextPartNumber += 1;
+          if (partNumber > totalParts) return;
+
+          const start = (partNumber - 1) * partSize;
+          const end = Math.min(start + partSize, selectedFile.size);
+          const part = selectedFile.slice(start, end);
+          const uploadedPartBytes = await uploadPartWithRetry(session.upload_session_id, partNumber, part, (loaded) => {
+            setPartProgress(partNumber, loaded);
+          });
+          inFlightProgress.delete(partNumber);
+          completedBytes += uploadedPartBytes;
+          completedParts += 1;
+          setUploadProgress({
+            status: "uploading",
+            uploadedBytes: Math.min(currentUploadedBytes(), selectedFile.size),
+            totalBytes: selectedFile.size,
+            uploadedChunks: completedParts,
+            totalChunks: totalParts,
+            message: "Uploading evidence parts directly to object storage...",
+          });
+        }
+      }
+
+      const workerCount = Math.min(MULTIPART_UPLOAD_CONCURRENCY, totalParts);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      if (cancelRequestedRef.current) throw new Error("Evidence upload was cancelled.");
+
       setUploadProgress((current) => current
-        ? { ...current, status: "finalizing", message: "Finalizing upload, hashing evidence, and storing metadata..." }
+        ? { ...current, status: "finalizing", message: "Completing multipart upload and hashing evidence from object storage..." }
         : current);
-      await completeEvidenceUpload(session.upload_id);
+      await completeMultipartEvidenceUpload(session.upload_session_id);
       activeUploadIdRef.current = null;
       setUploadProgress((current) => current
-        ? { ...current, status: "completed", uploadedBytes: file.size, message: "Evidence upload completed." }
+        ? { ...current, status: "completed", uploadedBytes: selectedFile.size, uploadedChunks: totalParts, message: "Evidence upload completed." }
         : current);
       navigate(`/cases/${caseId}`);
     } catch (err) {
       const cancelled = cancelRequestedRef.current;
+      activeXhrsRef.current.forEach((xhr) => xhr.abort());
       setUploadProgress((current) => current
         ? { ...current, status: cancelled ? "cancelled" : "failed", message: cancelled ? "Evidence upload was cancelled." : "Evidence upload failed." }
         : current);
@@ -201,20 +290,20 @@ export function EvidenceUploadPage() {
       }
     } finally {
       setSubmitting(false);
-      activeControllerRef.current = null;
+      activeXhrsRef.current.clear();
       cancelRequestedRef.current = false;
     }
   }
 
   async function handleCancelUpload() {
     cancelRequestedRef.current = true;
-    activeControllerRef.current?.abort();
+    activeXhrsRef.current.forEach((xhr) => xhr.abort());
     const uploadId = activeUploadIdRef.current;
     if (uploadId) {
       try {
-        await cancelEvidenceUpload(uploadId);
+        await cancelMultipartEvidenceUpload(uploadId);
       } catch {
-        // The session may already be gone if the backend cleaned it up.
+        // The session may already be gone if the backend or object storage cleaned it up.
       }
       activeUploadIdRef.current = null;
     }
@@ -244,7 +333,7 @@ export function EvidenceUploadPage() {
             Memory dump file
             <input ref={fileInputRef} disabled={submitting} type="file" onChange={handleFileChange} />
             <span className="field-help">Allowed extensions: {ALLOWED_EXTENSIONS.join(", ")}.</span>
-            <span className="field-help">RAMSight uploads large evidence in browser chunks to reduce memory pressure.</span>
+            <span className="field-help">RAMSight uploads large evidence directly to object storage with multipart presigned URLs. The backend does not assemble the full dump in /tmp.</span>
             {fileName && <span className="field-help">Selected file: {fileName}{fileSize !== null ? ` (${formatBytes(fileSize)})` : ""}</span>}
           </label>
 
@@ -298,7 +387,7 @@ export function EvidenceUploadPage() {
               </div>
               <progress className="upload-progress-bar" value={percent} max={100} />
               <span className="field-help">
-                {formatBytes(uploadProgress.uploadedBytes)} of {formatBytes(uploadProgress.totalBytes)} uploaded · chunk {uploadProgress.uploadedChunks} of {uploadProgress.totalChunks || "pending"} · status {uploadProgress.status}
+                {formatBytes(uploadProgress.uploadedBytes)} of {formatBytes(uploadProgress.totalBytes)} uploaded · part {uploadProgress.uploadedChunks} of {uploadProgress.totalChunks || "pending"} · status {uploadProgress.status}
               </span>
             </div>
           )}

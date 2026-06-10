@@ -13,14 +13,107 @@ from app.schemas.evidence import (
     EvidenceChunkedUploadInitiate,
     EvidenceChunkedUploadInitiateResponse,
     EvidenceListResponse,
+    EvidenceMultipartPartComplete,
+    EvidenceMultipartPartCompleteResponse,
+    EvidenceMultipartPresignPartRequest,
+    EvidenceMultipartPresignPartResponse,
+    EvidenceMultipartUploadInitiate,
+    EvidenceMultipartUploadInitiateResponse,
     EvidenceRead,
     EvidenceRegister,
 )
-from app.services import evidence_service, evidence_upload_session_service
+from app.services import evidence_multipart_upload_service, evidence_service, evidence_upload_session_service
 from app.services.errors import NotFoundError, ValidationError
 from app.storage.client import ObjectStorageClient, get_storage_client
 
 router = APIRouter()
+
+
+@router.post(
+    "/multipart/initiate",
+    response_model=EvidenceMultipartUploadInitiateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def initiate_multipart_evidence_upload(
+    payload: EvidenceMultipartUploadInitiate,
+    db: Session = Depends(get_db),
+    storage_client: ObjectStorageClient = Depends(get_storage_client),
+):
+    try:
+        return evidence_multipart_upload_service.initiate_multipart_upload(db, storage_client, payload)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="multipart evidence upload could not be initiated") from exc
+
+
+@router.post(
+    "/multipart/{session_id}/presign-part",
+    response_model=EvidenceMultipartPresignPartResponse,
+)
+def presign_multipart_evidence_part(
+    payload: EvidenceMultipartPresignPartRequest,
+    session_id: UUID,
+    storage_client: ObjectStorageClient = Depends(get_storage_client),
+):
+    try:
+        return evidence_multipart_upload_service.presign_upload_part(storage_client, session_id, payload)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="multipart upload part URL could not be created") from exc
+
+
+@router.post(
+    "/multipart/{session_id}/parts",
+    response_model=EvidenceMultipartPartCompleteResponse,
+)
+def record_multipart_evidence_part(
+    payload: EvidenceMultipartPartComplete,
+    session_id: UUID,
+):
+    try:
+        return evidence_multipart_upload_service.record_completed_part(session_id, payload)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/multipart/{session_id}/complete", response_model=EvidenceRead, status_code=status.HTTP_201_CREATED)
+def complete_multipart_evidence_upload(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    storage_client: ObjectStorageClient = Depends(get_storage_client),
+):
+    try:
+        return evidence_multipart_upload_service.complete_multipart_upload(db, storage_client, session_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="multipart evidence upload could not be completed") from exc
+
+
+@router.delete("/multipart/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_multipart_evidence_upload(
+    session_id: UUID,
+    storage_client: ObjectStorageClient = Depends(get_storage_client),
+):
+    try:
+        evidence_multipart_upload_service.abort_multipart_upload(storage_client, session_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="multipart evidence upload could not be cancelled") from exc
+    return None
 
 
 @router.post(

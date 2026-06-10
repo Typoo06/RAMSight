@@ -3,6 +3,7 @@
 from collections import defaultdict
 
 from app.detection.path_reputation import known_microsoft_appdata_path
+from app.detection.process_identity import build_process_identity_resolver, enrich_process_extra, process_identity_key
 from app.detection.rules import FindingDraft
 from app.parsers.common import is_placeholder_value
 
@@ -46,16 +47,22 @@ def process_key_from_finding(finding: FindingDraft) -> tuple | None:
     extra_data = finding.extra_data or {}
     pid = extra_data.get("pid")
     process_name = normalize_text(extra_data.get("process_name"))
-    image_path = normalize_path(extra_data.get("image_path"))
-    if pid is not None and process_name and image_path:
-        return "pid_name_path", pid, process_name, image_path
-    if pid is not None and process_name:
-        return "pid_name", pid, process_name
+    canonical = process_identity_key(finding.analysis_job_id, pid, process_name)
+    if canonical is not None:
+        return canonical
     if pid is not None:
-        return "pid", pid
+        return finding.analysis_job_id, pid, None
     if process_name:
-        return "name", process_name
+        return finding.analysis_job_id, None, process_name
     return None
+
+
+def finding_with_resolved_identity(finding: FindingDraft, resolver: dict | None = None) -> FindingDraft:
+    extra_data = finding.extra_data or {}
+    enriched = enrich_process_extra(extra_data, resolver)
+    if enriched == extra_data:
+        return finding
+    return FindingDraft(**{**finding.__dict__, "extra_data": enriched})
 
 
 def linked_artifacts_for_finding(finding: FindingDraft) -> dict:
@@ -190,6 +197,74 @@ def has_high_confidence_yara(components: list[FindingDraft]) -> bool:
     return False
 
 
+def has_malware_specific_yara(components: list[FindingDraft]) -> bool:
+    for component in components:
+        if "yara_match" not in evidence_groups_for_finding(component):
+            continue
+        extra_data = component.extra_data or {}
+        family = normalize_text(extra_data.get("malware_family") or extra_data.get("family"))
+        category = normalize_text(extra_data.get("rule_category") or extra_data.get("category"))
+        description = normalize_text(extra_data.get("description"))
+        rule_name = normalize_text(extra_data.get("rule_name"))
+        text = " ".join(value for value in [family, category, description, rule_name] if value)
+        if family and family not in {"generic", "unknown", "n/a", "none"}:
+            return True
+        if any(term in text for term in ["cobalt", "beacon", "malware", "trojan", "loader", "backdoor", "ransom", "mimikatz"]):
+            return True
+    return False
+
+
+def has_very_high_confidence_yara(components: list[FindingDraft]) -> bool:
+    for component in components:
+        if "yara_match" not in evidence_groups_for_finding(component):
+            continue
+        extra_data = component.extra_data or {}
+        confidence = normalize_text(extra_data.get("confidence"))
+        severity = normalize_text(extra_data.get("triage_severity")) or normalize_text(component.severity)
+        noisy = extra_flag_enabled(extra_data.get("noisy", False))
+        if confidence in {"high", "confirmed"} and severity == "critical" and not noisy and has_malware_specific_yara([component]):
+            return True
+    return False
+
+
+def has_correlated_yara_evidence(evidence_groups: set[str]) -> bool:
+    return "yara_match" in evidence_groups and bool(
+        evidence_groups & {"memory_region", "network_endpoint", "suspicious_command", "suspicious_module"}
+    )
+
+
+def has_benign_context_only(components: list[FindingDraft], evidence_groups: set[str]) -> bool:
+    if not components:
+        return False
+    benign_components = [
+        component
+        for component in components
+        if (component.extra_data or {}).get("finding_intent") == "benign_context"
+        or (component.extra_data or {}).get("detection_confidence") == "context_only"
+    ]
+    if not benign_components:
+        return False
+    strong_groups = {"network_endpoint", "suspicious_command", "suspicious_module"}
+    return not bool(evidence_groups & strong_groups) and not has_malware_specific_yara(components)
+
+
+def recommendation_for_process_summary(confidence: str) -> str:
+    if confidence == "probable_malware":
+        return (
+            "Treat this as a priority investigation candidate: validate containment needs, hunt for related telemetry, "
+            "and confirm the memory, YARA, network, and command-line evidence before declaring compromise."
+        )
+    if confidence == "context_only":
+        return (
+            "Review as low-priority context unless additional malware-specific YARA, network, command-line, or memory "
+            "correlation appears. Do not treat this context alone as a containment trigger."
+        )
+    return (
+        "Validate this suspicious triage signal by correlating the process, memory regions, YARA metadata, command line, "
+        "modules, and network evidence."
+    )
+
+
 def score_by_independent_evidence_groups(components: list[FindingDraft]) -> tuple[int, set[str]]:
     group_scores: dict[str, int] = {}
     evidence_groups = set()
@@ -223,14 +298,20 @@ def process_identity(pid, process_name) -> str:
     return "unknown process"
 
 
-def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: dict) -> list[FindingDraft]:
+def build_process_risk_summaries(
+    findings: list[FindingDraft],
+    scoring_config: dict,
+    artifacts: dict[str, list[dict]] | None = None,
+) -> list[FindingDraft]:
+    resolver = build_process_identity_resolver(artifacts)
     grouped: dict[tuple, list[FindingDraft]] = defaultdict(list)
     for finding in findings:
         if finding.category == "process_risk_summary":
             continue
-        key = process_key_from_finding(finding)
+        resolved_finding = finding_with_resolved_identity(finding, resolver)
+        key = process_key_from_finding(resolved_finding)
         if key is not None:
-            grouped[key].append(finding)
+            grouped[key].append(resolved_finding)
 
     summaries = []
     max_components = (
@@ -245,16 +326,26 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         selected = deduped[:max_components]
         total_score, evidence_groups = score_by_independent_evidence_groups(selected)
         severity = severity_for_score(total_score, scoring_config)
+        has_memory = "memory_region" in evidence_groups
+        has_yara = "yara_match" in evidence_groups
+        has_network = "network_endpoint" in evidence_groups
+        has_command = "suspicious_command" in evidence_groups
+        has_strong_yara = has_high_confidence_yara(selected) and has_malware_specific_yara(selected)
         if severity == "critical" and len(evidence_groups) < 2:
             severity = "high"
         if severity == "critical" and evidence_groups <= {"memory_region", "module_context"}:
             severity = "high"
-        if severity == "critical" and "yara_match" in evidence_groups:
-            has_memory = "memory_region" in evidence_groups
-            has_strong_context = bool(evidence_groups & {"network_endpoint", "suspicious_command", "suspicious_module"})
-            has_strong_yara = has_high_confidence_yara(selected)
-            if not (has_memory and (has_strong_context or has_strong_yara)):
+        if severity == "critical":
+            critical_allowed = (
+                (has_memory and has_yara and has_strong_yara)
+                or (has_memory and has_yara and has_network)
+                or (has_memory and has_yara and has_command)
+                or has_very_high_confidence_yara(selected)
+            )
+            if not critical_allowed:
                 severity = "high"
+        if severity in {"high", "critical"} and has_benign_context_only(selected, evidence_groups):
+            severity = "medium"
         first = selected[0]
         first_extra = first.extra_data or {}
         pid = first_extra.get("pid") or next(
@@ -273,6 +364,18 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
             ((component.extra_data or {}).get("image_path") for component in selected if (component.extra_data or {}).get("image_path")),
             None,
         )
+        command_line = first_extra.get("command_line") or next(
+            ((component.extra_data or {}).get("command_line") for component in selected if (component.extra_data or {}).get("command_line")),
+            None,
+        )
+        ppid = first_extra.get("ppid") or next(
+            ((component.extra_data or {}).get("ppid") for component in selected if (component.extra_data or {}).get("ppid") is not None),
+            None,
+        )
+        parent_process_name = first_extra.get("parent_process_name") or next(
+            ((component.extra_data or {}).get("parent_process_name") for component in selected if (component.extra_data or {}).get("parent_process_name")),
+            None,
+        )
         component_rule_ids = sorted({component.rule_id for component in selected})
         component_categories = sorted({component.category for component in selected})
         identity = process_identity(pid, process_name)
@@ -281,6 +384,15 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
         network_endpoint_count = count_unique_values(selected, "network_endpoint")
         yara_match_count = count_unique_values(selected, "yara_match")
         yara_rules, raw_yara_match_count = yara_rule_summary(selected)
+        correlated_yara = has_correlated_yara_evidence(evidence_groups)
+        very_high_yara = has_very_high_confidence_yara(selected)
+        confidence = "probable_malware" if severity in {"critical", "high"} and (
+            (correlated_yara and has_malware_specific_yara(selected))
+            or ("memory_region" in evidence_groups and bool(evidence_groups & {"network_endpoint", "suspicious_command"}))
+            or very_high_yara
+        ) else "suspicious"
+        if has_benign_context_only(selected, evidence_groups):
+            confidence = "context_only"
         summaries.append(
             FindingDraft(
                 analysis_job_id=first.analysis_job_id,
@@ -298,11 +410,14 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
                 description=f"Aggregated process-level risk for {identity} based on {', '.join(component_rule_ids)}.",
                 artifact_type="process",
                 artifact_id=":".join(str(part) for part in process_key[1:]),
-                recommendation="Prioritize this process for analyst review and correlate all component findings.",
+                recommendation=recommendation_for_process_summary(confidence),
                 extra_data={
                     "pid": pid,
                     "process_name": process_name,
                     "image_path": image_path,
+                    "command_line": command_line,
+                    "ppid": ppid,
+                    "parent_process_name": parent_process_name,
                     "total_score": total_score,
                     "unique_component_count": unique_component_count,
                     "component_finding_ids": [str(component.id) for component in selected],
@@ -315,6 +430,8 @@ def build_process_risk_summaries(findings: list[FindingDraft], scoring_config: d
                     "yara_match_count": yara_match_count,
                     "yara_raw_match_count": raw_yara_match_count,
                     "yara_rules": yara_rules,
+                    "finding_intent": "detection" if confidence == "probable_malware" else "suspicious_triage",
+                    "detection_confidence": confidence,
                 },
             )
         )

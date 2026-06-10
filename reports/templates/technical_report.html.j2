@@ -97,23 +97,22 @@
   </table>
   {% else %}<p>No plugin result metadata was available.</p>{% endif %}
 
-  <h2>Top Suspicious Findings</h2>
-  <p class="muted">This section is deduplicated for report readability. Stored findings are not modified.</p>
+  <h2>Top Actionable Detections</h2>
+  <p class="muted">Process-level detections and triage summaries are shown first. Supporting raw findings remain preserved below and in stored artifacts.</p>
   {% if display_top_findings %}
   <table>
-    <tr><th>Rule</th><th>Severity</th><th>Score</th><th>Process context</th><th>Artifact</th><th>Source plugin</th><th>Recommendation</th></tr>
+    <tr><th>Finding</th><th>Severity</th><th>Confidence</th><th>Process context</th><th>Evidence groups</th><th>Recommendation</th></tr>
     {% for finding in display_top_findings %}
     <tr>
-      <td>{{ finding.rule }}</td>
+      <td>{{ finding.title }}</td>
       <td class="severity-{{ finding.severity }}">{{ finding.severity }}</td>
-      <td>{{ finding.score }}</td>
+      <td>{{ finding.detection_confidence }}<br><span class="muted">Score {{ finding.score }}</span></td>
       <td>
         {% if finding.context_parts %}
         <ul>{% for part in finding.context_parts %}<li>{{ part }}</li>{% endfor %}</ul>
         {% else %}N/A{% endif %}
       </td>
-      <td>{{ finding.artifact_type }}</td>
-      <td>{{ finding.source_plugin }}</td>
+      <td>{% if finding.evidence_groups %}<ul>{% for group in finding.evidence_groups %}<li>{{ group }}</li>{% endfor %}</ul>{% else %}{{ finding.artifact_type }}{% endif %}</td>
       <td>{{ finding.recommendation }}</td>
     </tr>
     {% endfor %}
@@ -171,12 +170,12 @@
     {% endfor %}
   {% else %}<p>No process-centered memory-only evidence chains were available.</p>{% endif %}
 
-  <h2>IOC Summary</h2>
+  <h2>Threat-Oriented IOCs</h2>
   <p class="muted">{{ ioc_export_note }}</p>
-  {% if ioc_summary %}
+  {% if threat_ioc_summary %}
   <table>
     <tr><th>IOC type</th><th>Count</th><th>Representative values</th><th>Source plugins</th><th>Confidence range</th></tr>
-    {% for row in ioc_summary %}
+    {% for row in threat_ioc_summary %}
     <tr>
       <td>{{ row.ioc_type }}</td>
       <td>{{ row.count }}</td>
@@ -186,7 +185,24 @@
     </tr>
     {% endfor %}
   </table>
-  {% else %}<p>No IOC records were extracted.</p>{% endif %}
+  {% else %}<p>No threat-oriented IOC records were extracted.</p>{% endif %}
+
+  <h2>Investigation Artifacts</h2>
+  <p class="muted">These are useful pivots for investigation, but they are not presented as standalone threat IOCs.</p>
+  {% if investigation_artifact_summary %}
+  <table>
+    <tr><th>Artifact type</th><th>Count</th><th>Representative values</th><th>Source plugins</th><th>Confidence range</th></tr>
+    {% for row in investigation_artifact_summary %}
+    <tr>
+      <td>{{ row.ioc_type }}</td>
+      <td>{{ row.count }}</td>
+      <td>{% if row.representative_values %}<ul>{% for value in row.representative_values %}<li>{{ value }}</li>{% endfor %}</ul>{% else %}N/A{% endif %}</td>
+      <td>{% if row.source_plugins %}{% for plugin in row.source_plugins %}{{ plugin }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>{{ row.confidence_range }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p>No investigation artifact IOC records were extracted.</p>{% endif %}
 
   <h2>Network Indicators</h2>
   {% if network_display %}
@@ -246,13 +262,19 @@
 
   <h2>YARA Matches</h2>
   {% if yara_status and yara_status.message %}<p>{{ yara_status.message }}</p>{% endif %}
-  <p class="muted">Demo YARA rules are triage aids and should not be treated as production malware signatures.</p>
+  <p class="muted">Third-party YARA rules are defensive triage aids. Treat matches as leads for correlation with process, memory-region, command-line, module, and network evidence.</p>
   {% if yara_summary %}
   <table>
-    <tr><th>Rule</th><th>Match count</th><th>Representative targets</th><th>Sample offsets</th><th>Source plugins</th></tr>
+    <tr><th>Rule</th><th>Pack</th><th>Category / family</th><th>Match count</th><th>Representative targets</th><th>Sample offsets</th><th>Source plugins</th></tr>
     {% for row in yara_summary %}
     <tr>
       <td>{{ row.rule_name }}</td>
+      <td>{% if row.source_packs %}{% for pack in row.source_packs %}{{ pack }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
+      <td>
+        {% if row.rule_categories %}Category: {% for category in row.rule_categories %}{{ category }}{% if not loop.last %}, {% endif %}{% endfor %}<br>{% endif %}
+        {% if row.malware_families %}Family: {% for family in row.malware_families %}{{ family }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        {% if not row.rule_categories and not row.malware_families %}N/A{% endif %}
+      </td>
       <td>{{ row.match_count }}</td>
       <td>{% if row.targets %}{% for target in row.targets %}{{ target }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>
       <td>{% if row.sample_offsets %}{% for offset in row.sample_offsets %}{{ offset }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}N/A{% endif %}</td>

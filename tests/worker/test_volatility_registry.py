@@ -68,6 +68,18 @@ def test_explicit_windows_memory_yara_profile_includes_vadyarascan() -> None:
     assert "windows.malfind" in plugin_names
 
 
+def test_third_party_yara_profiles_include_vadyarascan() -> None:
+    for profile in [
+        "windows_memory_yara_elastic",
+        "windows_memory_yara_neo23x0",
+        "windows_memory_yara_third_party_all",
+    ]:
+        plugin_names = [plugin.name for plugin in select_plugins("windows", plugin_profile=profile, requested_plugins=None)]
+
+        assert "windows.vadyarascan" in plugin_names
+        assert "windows.pslist" in plugin_names
+
+
 def test_unknown_os_without_requested_plugins_fails_cleanly() -> None:
     with pytest.raises(PluginSelectionError, match="unknown OS family"):
         select_plugins("unknown", plugin_profile=None, requested_plugins=None)

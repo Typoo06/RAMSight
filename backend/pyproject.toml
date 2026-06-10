@@ -12,6 +12,7 @@ dependencies = [
   "pydantic",
   "pydantic-settings",
   "minio",
+  "boto3",
   "celery",
   "redis",
   "pytest",

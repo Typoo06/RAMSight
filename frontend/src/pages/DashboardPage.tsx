@@ -57,7 +57,10 @@ function listNote<T>(label: string, list: LoadedList<T>): string {
 
 function profileLabel(profile: string | null | undefined): string {
   if (profile === "windows_default") return "Standard Windows triage";
-  if (profile === "windows_memory_yara") return "Windows memory + YARA triage";
+  if (profile === "windows_memory_yara") return "Elastic YARA (compatibility alias)";
+  if (profile === "windows_memory_yara_elastic") return "Elastic YARA";
+  if (profile === "windows_memory_yara_neo23x0") return "Neo23x0 Signature Base YARA";
+  if (profile === "windows_memory_yara_third_party_all") return "Third-party YARA All (slow)";
   return displayValue(profile);
 }
 

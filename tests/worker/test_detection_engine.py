@@ -158,10 +158,10 @@ def test_yara_match_finding_supports_critical_metadata() -> None:
                 "plugin_result_id": uuid4(),
                 "source_plugin": "yarascan",
                 "rule_name": "SuspiciousRule",
-                "target_type": "process",
-                "target_identifier": "1234",
-                "offset": 4096,
-                "extra_data": {"severity": "critical", "confidence": "high"},
+                    "target_type": "process",
+                    "target_identifier": "1234",
+                    "offset": 4096,
+                    "extra_data": {"severity": "critical", "confidence": "high", "malware_family": "example_loader"},
             }
         ]
     }
@@ -173,16 +173,25 @@ def test_yara_match_finding_supports_critical_metadata() -> None:
     assert findings[0].score == 13
 
 
-def test_broad_demo_yara_matches_are_summarized_per_rule() -> None:
+def test_broad_generic_yara_matches_are_summarized_per_rule() -> None:
     yara_rows = [
         {
             "id": uuid4(),
             "source_plugin": "windows.vadyarascan",
-            "rule_name": "RAMSight_Demo_PE_Header_In_Memory_Candidate",
+            "rule_name": "Generic_PE_Header_In_Memory_Candidate",
             "target_type": "process_memory",
             "target_identifier": f"PID {400 + index}",
             "offset": 0x1000 + index,
-            "extra_data": {"offset_raw": hex(0x1000 + index)},
+            "extra_data": {
+                "offset_raw": hex(0x1000 + index),
+                "source_pack": "elastic_yara",
+                "rule_category": "generic",
+                "description": "generic PE header heuristic",
+                "severity": "high",
+                "confidence": "candidate",
+                "noisy": True,
+                "requires_correlation": True,
+            },
         }
         for index in range(10)
     ]
@@ -193,8 +202,8 @@ def test_broad_demo_yara_matches_are_summarized_per_rule() -> None:
     assert len(findings) == 1
     assert len(artifacts[YARA_TABLE]) == 10
     assert findings[0].severity == "low"
-    assert findings[0].title == "YARA triage summary: RAMSight_Demo_PE_Header_In_Memory_Candidate"
-    assert findings[0].extra_data["rule_name"] == "RAMSight_Demo_PE_Header_In_Memory_Candidate"
+    assert findings[0].title == "YARA triage summary: Generic_PE_Header_In_Memory_Candidate"
+    assert findings[0].extra_data["rule_name"] == "Generic_PE_Header_In_Memory_Candidate"
     assert findings[0].extra_data["affected_pid_count"] == 10
     assert findings[0].extra_data["total_match_count"] == 10
     assert findings[0].extra_data["sample_pids"] == [400, 401, 402, 403, 404]
@@ -232,7 +241,7 @@ def test_high_confidence_non_noisy_yara_can_emit_per_process_findings() -> None:
 
     assert len(findings) == 2
     assert {finding.extra_data["pid"] for finding in findings} == {1200, 1300}
-    assert {finding.severity for finding in findings} == {"high"}
+    assert {finding.severity for finding in findings} == {"medium"}
 
 
 def test_psscan_only_hidden_process_candidate_compares_by_pid() -> None:
@@ -251,6 +260,27 @@ def test_psscan_only_hidden_process_candidate_compares_by_pid() -> None:
     assert findings[0].severity == "high"
     assert "hidden process candidate" in findings[0].description
     assert findings[0].extra_data["pid"] == 777
+
+
+def test_ftk_imager_hidden_process_candidate_includes_acquisition_context() -> None:
+    artifacts = {
+        PROCESS_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 778,
+                "name": "FTK Imager.exe",
+                "image_path": "C:\\Program Files\\AccessData\\FTK Imager\\FTK Imager.exe",
+                "source_plugin": "windows.psscan",
+            }
+        ]
+    }
+
+    findings = evaluate_rules([rule_by_id("WIN_PSSCAN_ONLY_PROCESS")], artifacts, context())
+
+    assert len(findings) == 1
+    assert "acquisition" in findings[0].description.lower()
+    assert "acquisition" in findings[0].recommendation.lower()
+    assert findings[0].extra_data["acquisition_tool_context"]["name"] == "FTK Imager acquisition tooling"
 
 
 def test_process_risk_aggregation_creates_summary_finding_with_identity() -> None:
@@ -461,7 +491,7 @@ def test_process_risk_summary_aggregates_memory_only_signals() -> None:
     assert summaries[0].extra_data["pid"] == 2924
     assert summaries[0].extra_data["process_name"] == "WinRAR.exe"
     assert summaries[0].extra_data["total_score"] == 21
-    assert summaries[0].severity == "critical"
+    assert summaries[0].severity == "high"
     assert summaries[0].extra_data["unique_component_count"] == 2
     assert summaries[0].extra_data["memory_region_count"] == 1
     assert summaries[0].extra_data["network_endpoint_count"] == 1
@@ -493,10 +523,18 @@ def test_process_risk_summary_counts_unique_yara_rules_not_offsets() -> None:
         {
             "id": uuid4(),
             "source_plugin": "windows.vadyarascan",
-            "rule_name": "RAMSight_Demo_Injection_API_Cluster",
+            "rule_name": "Elastic_Malware_Injection_API_Cluster",
             "target_type": "process_memory",
             "target_identifier": "2924",
             "offset": 0x500000 + index,
+            "extra_data": {
+                "source_pack": "elastic_yara",
+                "source_repository": "https://github.com/elastic/protections-artifacts",
+                "rule_category": "malware",
+                "malware_family": "example_loader",
+                "severity": "high",
+                "confidence": "high",
+            },
         }
         for index in range(12)
     ]
@@ -508,23 +546,229 @@ def test_process_risk_summary_counts_unique_yara_rules_not_offsets() -> None:
 
     assert len([finding for finding in findings if finding.rule_id == "YARA_MATCH_IN_PROCESS_MEMORY"]) == 1
     assert len(summaries) == 1
-    assert summaries[0].severity == "high"
+    assert summaries[0].severity == "critical"
     assert summaries[0].extra_data["unique_component_count"] == 2
     assert summaries[0].extra_data["yara_rule_count"] == 1
     assert summaries[0].extra_data["yara_match_count"] == 1
     assert summaries[0].extra_data["yara_raw_match_count"] == 12
-    assert summaries[0].extra_data["yara_rules"] == ["RAMSight_Demo_Injection_API_Cluster"]
+    assert summaries[0].extra_data["yara_rules"] == ["Elastic_Malware_Injection_API_Cluster"]
 
 
-def test_yara_only_demo_matches_do_not_create_process_critical_summaries() -> None:
+def test_pid_only_yara_merges_into_named_process_summary_when_process_metadata_exists() -> None:
+    ctx = context()
+    artifacts = {
+        PROCESS_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 14484,
+                "name": "powershell.exe",
+                "image_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                "command_line": "powershell.exe -nop",
+                "source_plugin": "windows.pslist",
+            }
+        ],
+        MEMORY_REGION_TABLE: [
+            {
+                **memory_region(pid=14484),
+                "process_name": "powershell.exe",
+                "image_path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            }
+        ],
+        YARA_TABLE: [
+            {
+                "id": uuid4(),
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": "CobaltStrike_Beacon_Memory",
+                "target_type": "process_memory",
+                "target_identifier": "PID 14484",
+                "offset": 0x500000,
+                "extra_data": {
+                    "source_pack": "elastic_yara",
+                    "rule_category": "malware",
+                    "malware_family": "cobaltstrike",
+                    "severity": "high",
+                    "confidence": "high",
+                },
+            }
+        ],
+    }
+
+    findings = evaluate_rules(
+        [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")],
+        artifacts,
+        ctx,
+    )
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()), artifacts)
+
+    assert len(summaries) == 1
+    assert summaries[0].extra_data["pid"] == 14484
+    assert summaries[0].extra_data["process_name"] == "powershell.exe"
+    assert summaries[0].extra_data["image_path"].endswith("powershell.exe")
+    assert summaries[0].severity in {"high", "critical"}
+    assert "CobaltStrike_Beacon_Memory" in summaries[0].extra_data["yara_rules"]
+
+
+def test_elastic_endpoint_pid_only_yara_merges_but_benign_context_downgrades_malfind_only() -> None:
+    ctx = context()
+    artifacts = {
+        PROCESS_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 3248,
+                "name": "elastic-endpoi",
+                "image_path": "C:\\Program Files\\Elastic\\Endpoint\\elastic-endpoint.exe",
+                "source_plugin": "windows.pslist",
+            }
+        ],
+        MEMORY_REGION_TABLE: [
+            {
+                **memory_region(pid=3248),
+                "process_name": "elastic-endpoi",
+                "image_path": "C:\\Program Files\\Elastic\\Endpoint\\elastic-endpoint.exe",
+            }
+        ],
+        YARA_TABLE: [
+            {
+                "id": uuid4(),
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": "Generic_PE_Header_In_Memory_Candidate",
+                "target_type": "process_memory",
+                "target_identifier": "PID 3248",
+                "offset": 0x600000,
+                "extra_data": {
+                    "source_pack": "elastic_yara",
+                    "rule_category": "generic",
+                    "severity": "medium",
+                    "confidence": "candidate",
+                    "noisy": False,
+                    "requires_correlation": False,
+                },
+            }
+        ],
+    }
+
+    findings = evaluate_rules(
+        [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")],
+        artifacts,
+        ctx,
+    )
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()), artifacts)
+
+    assert len(summaries) == 1
+    assert summaries[0].extra_data["pid"] == 3248
+    assert summaries[0].extra_data["process_name"] == "elastic-endpoi"
+    assert summaries[0].severity == "medium"
+    assert summaries[0].extra_data["detection_confidence"] == "context_only"
+    assert "prioritize" not in summaries[0].recommendation.lower()
+
+
+def test_process_identity_does_not_use_module_path_as_image_path() -> None:
+    ctx = context()
+    artifacts = {
+        PROCESS_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 12292,
+                "name": "smartscreen.ex",
+                "image_path": None,
+                "source_plugin": "windows.pslist",
+            }
+        ],
+        MEMORY_REGION_TABLE: [
+            {
+                **memory_region(pid=12292),
+                "process_name": "smartscreen.ex",
+                "image_path": None,
+            }
+        ],
+        NETWORK_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 12292,
+                "process_name": "smartscreen.ex",
+                "remote_address": "8.8.8.8",
+                "remote_port": 443,
+                "source_plugin": "windows.netscan",
+            }
+        ],
+        MODULE_TABLE: [
+            {
+                "id": uuid4(),
+                "pid": 12292,
+                "process_name": "smartscreen.ex",
+                "module_name": "RPCRT4.dll",
+                "module_path": "C:\\Windows\\System32\\RPCRT4.dll",
+                "source_plugin": "windows.dlllist",
+            }
+        ],
+    }
+
+    findings = evaluate_rules(
+        [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("MEMORY_REGION_WITH_NETWORK_ACTIVITY")],
+        artifacts,
+        ctx,
+    )
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()), artifacts)
+
+    assert len(summaries) == 1
+    assert summaries[0].extra_data["process_name"] == "smartscreen.ex"
+    assert summaries[0].extra_data.get("image_path") in {None, ""}
+    assert "RPCRT4.dll" not in str(summaries[0].extra_data.get("image_path"))
+
+
+def test_yara_only_memcompression_like_summary_is_suspicious_not_probable() -> None:
+    ctx = context()
+    artifacts = {
+        PROCESS_TABLE: [
+            {"id": uuid4(), "pid": 1780, "name": "MemCompression", "image_path": None, "source_plugin": "windows.pslist"}
+        ],
+        YARA_TABLE: [
+            {
+                "id": uuid4(),
+                "source_plugin": "windows.vadyarascan",
+                "rule_name": rule_name,
+                "target_type": "process_memory",
+                "target_identifier": "PID 1780",
+                "offset": 0x700000 + index,
+                "extra_data": {
+                    "source_pack": "elastic_yara",
+                    "rule_category": "malware",
+                    "malware_family": "example_loader",
+                    "severity": "high",
+                    "confidence": "high",
+                },
+            }
+            for index, rule_name in enumerate(["Windows_Trojan_Generic_A", "Linux_Trojan_Generic_B"])
+        ],
+    }
+
+    findings = evaluate_rules([rule_by_id("YARA_MATCH"), rule_by_id("YARA_MATCH_IN_PROCESS_MEMORY")], artifacts, ctx)
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()), artifacts)
+
+    assert len(summaries) == 1
+    assert summaries[0].extra_data["process_name"] == "MemCompression"
+    assert summaries[0].extra_data["evidence_groups"] == ["yara_match"]
+    assert summaries[0].extra_data["detection_confidence"] == "suspicious"
+
+
+def test_yara_only_generic_third_party_matches_do_not_create_process_critical_summaries() -> None:
     yara_rows = [
         {
             "id": uuid4(),
             "source_plugin": "windows.vadyarascan",
-            "rule_name": "RAMSight_Demo_PE_Header_In_Memory_Candidate",
+            "rule_name": "Generic_PE_Header_In_Memory_Candidate",
             "target_type": "process_memory",
             "target_identifier": f"PID {600 + index}",
             "offset": 0x700000 + index,
+            "extra_data": {
+                "source_pack": "elastic_yara",
+                "rule_category": "generic",
+                "description": "generic PE header heuristic",
+                "severity": "high",
+                "confidence": "candidate",
+                "noisy": True,
+                "requires_correlation": True,
+            },
         }
         for index in range(30)
     ]
@@ -547,10 +791,17 @@ def test_yara_memory_and_network_correlation_can_be_critical() -> None:
             {
                 "id": uuid4(),
                 "source_plugin": "windows.vadyarascan",
-                "rule_name": "RAMSight_Demo_Injection_API_Cluster",
+                "rule_name": "Elastic_Malware_Injection_API_Cluster",
                 "target_type": "process_memory",
                 "target_identifier": "2924",
                 "offset": 0x500000,
+                "extra_data": {
+                    "source_pack": "elastic_yara",
+                    "rule_category": "malware",
+                    "malware_family": "example_loader",
+                    "severity": "high",
+                    "confidence": "high",
+                },
             }
         ],
     }
@@ -585,6 +836,7 @@ def test_high_confidence_yara_and_memory_can_be_critical() -> None:
                 "extra_data": {
                     "severity": "high",
                     "confidence": "high",
+                    "malware_family": "example_loader",
                     "noisy": False,
                     "requires_correlation": False,
                 },
@@ -705,8 +957,8 @@ def test_repeated_onedrive_modules_do_not_make_process_summary_critical_by_thems
     module_context_findings = [finding for finding in findings if finding.rule_id == "MEMORY_REGION_WITH_SUSPICIOUS_MODULE"]
     assert len(module_context_findings) == 1
     assert len(summaries) == 1
-    assert summaries[0].severity == "high"
-    assert summaries[0].extra_data["total_score"] == 13
+    assert summaries[0].severity == "medium"
+    assert summaries[0].extra_data["total_score"] == 10
     assert summaries[0].extra_data["unique_component_count"] == 2
     assert summaries[0].extra_data["evidence_groups"] == ["memory_region", "module_context"]
 
@@ -732,5 +984,5 @@ def test_unknown_user_writable_module_path_still_contributes_strong_context() ->
     assert len(module_findings) == 1
     assert module_findings[0].severity == "high"
     assert len(summaries) == 1
-    assert summaries[0].severity == "critical"
+    assert summaries[0].severity == "high"
     assert "suspicious_module" in summaries[0].extra_data["evidence_groups"]

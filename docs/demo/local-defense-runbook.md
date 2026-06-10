@@ -37,7 +37,7 @@ Known-good local demo example, not a universal expected value:
 Job ID: 48c0f65b-79e7-4728-bc27-f55f986a7ae2
 Evidence: attack2_process_Injection.mem
 OS: Windows 10 x64
-Profile: windows_memory_yara
+Profile: windows_memory_yara_elastic
 Plugin results: 9 total, 9 completed, 0 failed
 Risk findings: 69
 IOC records: 60
@@ -98,7 +98,7 @@ A passing preflight means the demo surface is reachable, dependencies are ready,
 
 3. Upload or register a lab memory dump. For large memory dumps, use the browser chunked upload workflow rather than the direct multipart upload endpoint.
 
-4. Start analysis with the `windows_memory_yara` profile. This is the recommended memory-only malware demo path because it includes process-memory YARA scanning in addition to the standard Windows Volatility triage plugins.
+4. Start analysis with the `windows_memory_yara_elastic` profile. This is the recommended memory-only malware demo path because it includes process-memory YARA scanning with a validated third-party rule pack in addition to the standard Windows Volatility triage plugins.
 
 5. Open the completed attack2 analysis job. Use the known-good job if the goal is presentation stability instead of rerunning a large analysis.
 

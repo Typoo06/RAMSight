@@ -31,9 +31,19 @@ interface YaraMatchTableProps {
   limit?: number;
 }
 
-function truncateText(value: string | null | undefined, maxLength = 180): string {
+function truncateText(value: string | null | undefined, maxLength = 420): string {
   if (!value) return "Not recorded";
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function copyToClipboard(value: string): void {
+  if (!value || value === "Not recorded" || !navigator.clipboard) return;
+  void navigator.clipboard.writeText(value);
+}
+
+function CopyButton({ value }: { value: string }) {
+  if (!value || value === "Not recorded") return null;
+  return <button className="copy-button" type="button" onClick={() => copyToClipboard(value)}>Copy</button>;
 }
 
 function addressRange(region: MemoryRegionArtifact): string {
@@ -79,7 +89,7 @@ export function MemoryRegionTable({ caption, memoryRegions, limit = 50 }: Memory
             <tr key={region.id}>
               <td>{displayValue(region.pid)}</td>
               <td>{displayValue(region.process_name)}</td>
-              <td className="long-text"><code className="code-value">{addressRange(region)}</code></td>
+              <td className="long-text readable-code-cell"><code>{addressRange(region)}</code><CopyButton value={addressRange(region)} /></td>
               <td>{displayValue(region.protection)}</td>
               <td>{region.is_executable ? "Yes" : "No"}</td>
               <td className="long-text">{displayValue(region.source_plugin)}</td>
@@ -115,9 +125,9 @@ export function YaraMatchTable({ caption, yaraMatches, limit = 50 }: YaraMatchTa
         <tbody>
           {visibleMatches.map((match) => (
             <tr key={match.id}>
-              <td className="long-text">{match.rule_name}</td>
+              <td className="long-text readable-code-cell"><code>{match.rule_name}</code><CopyButton value={match.rule_name} /></td>
               <td className="long-text">{displayValue(match.target_identifier)}</td>
-              <td className="long-text"><code className="code-value">{offsetText(match.offset)}</code></td>
+              <td className="long-text readable-code-cell"><code>{offsetText(match.offset)}</code><CopyButton value={offsetText(match.offset)} /></td>
               <td>{displayValue(match.namespace)}</td>
               <td className="long-text">{displayValue(match.source_plugin)}</td>
               <td className="long-text">{truncateText(match.matched_text_excerpt)}</td>
@@ -161,7 +171,7 @@ export function ArtifactDrilldown({
                   <td>{displayValue(process.pid)}</td>
                   <td>{displayValue(process.ppid)}</td>
                   <td>{displayValue(process.name)}</td>
-                  <td className="long-text"><code className="code-value">{displayValue(process.image_path)}</code></td>
+                  <td className="long-text readable-code-cell"><code>{displayValue(process.image_path)}</code><CopyButton value={displayValue(process.image_path)} /></td>
                   <td className="long-text">{displayValue(process.source_plugin)}</td>
                 </tr>
               ))}
@@ -182,7 +192,7 @@ export function ArtifactDrilldown({
                 <tr key={command.id}>
                   <td>{displayValue(command.pid)}</td>
                   <td>{displayValue(command.process_name)}</td>
-                  <td className="long-text"><code className="code-value">{truncateText(command.command, 260)}</code></td>
+                  <td className="long-text readable-code-cell"><code>{truncateText(command.command, 520)}</code><CopyButton value={displayValue(command.command)} /></td>
                   <td className="long-text">{displayValue(command.source_plugin)}</td>
                 </tr>
               ))}
@@ -204,7 +214,7 @@ export function ArtifactDrilldown({
                   <td>{displayValue(network.pid)}</td>
                   <td>{displayValue(network.process_name)}</td>
                   <td>{displayValue(network.protocol)}</td>
-                  <td className="long-text"><code className="code-value">{endpoint(network)}</code></td>
+                  <td className="long-text readable-code-cell"><code>{endpoint(network)}</code><CopyButton value={endpoint(network)} /></td>
                   <td>{displayValue(network.state)}</td>
                   <td className="long-text">{displayValue(network.source_plugin)}</td>
                 </tr>
@@ -227,7 +237,7 @@ export function ArtifactDrilldown({
                   <td>{displayValue(module.pid)}</td>
                   <td>{displayValue(module.process_name)}</td>
                   <td>{displayValue(module.module_name)}</td>
-                  <td className="long-text"><code className="code-value">{displayValue(module.module_path)}</code></td>
+                  <td className="long-text readable-code-cell"><code>{displayValue(module.module_path)}</code><CopyButton value={displayValue(module.module_path)} /></td>
                   <td className="long-text">{displayValue(module.source_plugin)}</td>
                 </tr>
               ))}

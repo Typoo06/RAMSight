@@ -11,6 +11,11 @@ def test_expected_routes_are_registered() -> None:
     assert "/api/v1/cases" in routes
     assert "/api/v1/cases/{case_id}" in routes
     assert "/api/v1/evidences" in routes
+    assert "/api/v1/evidences/multipart/initiate" in routes
+    assert "/api/v1/evidences/multipart/{session_id}/presign-part" in routes
+    assert "/api/v1/evidences/multipart/{session_id}/parts" in routes
+    assert "/api/v1/evidences/multipart/{session_id}/complete" in routes
+    assert "/api/v1/evidences/multipart/{session_id}" in routes
     assert "/api/v1/evidences/uploads/initiate" in routes
     assert "/api/v1/evidences/uploads/{upload_id}/chunks/{chunk_index}" in routes
     assert "/api/v1/evidences/uploads/{upload_id}/complete" in routes

@@ -23,7 +23,7 @@ from app.parsers.persistence import (
     update_plugin_result_parsed_output,
     write_parsed_output,
 )
-from app.parsers.registry import parse_raw_wrapper
+from app.parsers.registry import parse_raw_output_file
 from app.storage.client import ObjectStorageClient, StorageObject
 from app.storage.keys import normalize_object_name_part
 from app.reports.persistence import run_html_report_generation_for_job
@@ -31,6 +31,7 @@ from app.tasks.status import STATUS_COMPLETED, STATUS_FAILED, STATUS_QUEUED, STA
 from app.utils.workspace import isolated_job_workspace
 from app.volatility.registry import select_plugins
 from app.volatility.runner import VolatilityRunResult, ensure_volatility_available, run_volatility_plugin
+from app.yara.rules import load_yara_pack_rule_metadata
 
 ANALYSIS_TASK_NAME = "app.tasks.analysis.run_analysis_job"
 LOGGER = logging.getLogger(__name__)
@@ -129,6 +130,36 @@ def evidence_download_path(workspace: Path, original_filename: str | None) -> Pa
     suffix = PurePath(filename).suffix
     safe_name = normalize_object_name_part(f"evidence{suffix or '.bin'}")
     return workspace / "evidence" / safe_name
+
+
+def enrich_yara_match_records(batch, run_result: VolatilityRunResult) -> None:
+    if batch.table_name != "yara_matches":
+        return
+    pack_name = (run_result.extra_data or {}).get("yara_rule_pack")
+    metadata_by_rule = load_yara_pack_rule_metadata(get_settings(), str(pack_name) if pack_name else None)
+    for record in batch.records:
+        rule_name = str(record.get("rule_name") or "").lower()
+        rule_metadata = metadata_by_rule.get(rule_name, {})
+        extra_data = record.setdefault("extra_data", {})
+        if not isinstance(extra_data, dict):
+            extra_data = {}
+            record["extra_data"] = extra_data
+        if pack_name:
+            extra_data.setdefault("source_pack", pack_name)
+        for key in [
+            "source_repository",
+            "source_path",
+            "rule_category",
+            "malware_family",
+            "license",
+            "author",
+            "description",
+            "severity",
+            "triage_severity",
+            "confidence",
+        ]:
+            if rule_metadata.get(key) is not None:
+                extra_data.setdefault(key, rule_metadata[key])
 
 
 # Raw stdout/stderr stay in MinIO; PostgreSQL stores status and object metadata only.
@@ -245,7 +276,12 @@ def run_analysis_job(job_id: str) -> dict:
 
             for plugin in selected_plugins:
                 plugin_started_at = utc_now()
-                run_result = run_volatility_plugin(plugin, evidence_path, raw_dir)
+                run_result = run_volatility_plugin(
+                    plugin,
+                    evidence_path,
+                    raw_dir,
+                    plugin_profile=context.get("plugin_profile"),
+                )
                 plugin_completed_at = utc_now()
                 raw_output = None
                 status = run_result.status
@@ -277,7 +313,10 @@ def run_analysis_job(job_id: str) -> dict:
                 if status == STATUS_COMPLETED:
                     parse_context = {**context, "source_plugin": run_result.source_plugin}
                     try:
-                        batch = parse_raw_wrapper(run_result.raw_output_path)
+                        batch = parse_raw_output_file(
+                            run_result.raw_output_path, run_result.source_plugin, status=run_result.status
+                        )
+                        enrich_yara_match_records(batch, run_result)
                         parsed_path = workspace / "parsed" / run_result.raw_output_path.name
                         parsed_count = len(batch.records)
                         write_parsed_output(parsed_path, batch, parsed_count)

@@ -13,7 +13,7 @@ import type { AnalysisJob, AnalysisPluginProfile, Case, Evidence } from "../type
 import { displayValue, formatBytes, formatDateTime, formatDurationMs, shortHash } from "../utils/format";
 import { statusTone } from "../utils/status";
 
-const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_memory_yara";
+const DEFAULT_ANALYSIS_PROFILE: AnalysisPluginProfile = "windows_memory_yara_elastic";
 
 const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; value: AnalysisPluginProfile }> = [
   {
@@ -22,11 +22,29 @@ const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; valu
     description: "Fast default RAMSight analysis without YARA process-memory scanning.",
   },
   {
-    value: "windows_memory_yara",
-    label: "Memory-only demo + YARA",
-    description: "Recommended for thesis demos: standard Windows triage plus YARA process-memory scanning when rules are available.",
+    value: "windows_memory_yara_elastic",
+    label: "Elastic YARA",
+    description: "Recommended demo path: standard Windows triage plus Elastic third-party YARA process-memory scanning.",
+  },
+  {
+    value: "windows_memory_yara_neo23x0",
+    label: "Neo23x0 Signature Base YARA",
+    description: "Runs standard Windows triage plus Neo23x0 Signature Base process-memory YARA rules.",
+  },
+  {
+    value: "windows_memory_yara_third_party_all",
+    label: "Third-party YARA All (slow)",
+    description: "Runs Elastic and Neo23x0 YARA packs together. Use explicitly; this can be slow and memory intensive on large dumps.",
   },
 ];
+
+const PROFILE_LABELS: Record<string, string> = {
+  windows_default: "Standard Windows triage",
+  windows_memory_yara: "Elastic YARA (compatibility alias)",
+  windows_memory_yara_elastic: "Elastic YARA",
+  windows_memory_yara_neo23x0: "Neo23x0 Signature Base YARA",
+  windows_memory_yara_third_party_all: "Third-party YARA All (slow)",
+};
 
 function evidenceOsFamily(evidence: Evidence): string {
   return evidence.os_family || "windows";
@@ -54,7 +72,7 @@ function profileHelpText(evidence: Evidence, profile: AnalysisPluginProfile): st
 }
 
 function profileLabel(profile: string | null | undefined): string {
-  return ANALYSIS_PROFILE_OPTIONS.find((option) => option.value === profile)?.label ?? displayValue(profile);
+  return PROFILE_LABELS[String(profile || "").toLowerCase()] ?? displayValue(profile);
 }
 
 export function CaseDetailPage() {

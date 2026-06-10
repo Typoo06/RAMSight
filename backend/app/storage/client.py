@@ -91,6 +91,31 @@ class ObjectStorageClient:
     def reports_bucket(self) -> str:
         return self.settings.minio_bucket_reports
 
+
+    def _endpoint_url(self, endpoint: str, secure: bool) -> str:
+        if endpoint.startswith(("http://", "https://")):
+            return endpoint
+        scheme = "https" if secure else "http"
+        return f"{scheme}://{endpoint}"
+
+    def _s3_client(self, public: bool = False):
+        try:
+            import boto3
+            from botocore.config import Config
+        except ImportError as exc:
+            raise RuntimeError("boto3 is required for S3 multipart evidence uploads") from exc
+
+        endpoint = self.settings.minio_public_endpoint if public else self.settings.minio_endpoint
+        secure = self.settings.minio_public_secure if public else self.settings.minio_secure
+        return boto3.client(
+            "s3",
+            endpoint_url=self._endpoint_url(endpoint, secure),
+            aws_access_key_id=self.settings.minio_access_key,
+            aws_secret_access_key=self.settings.minio_secret_key,
+            region_name="us-east-1",
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        )
+
     def ensure_bucket(self, bucket_name: str) -> None:
         if not self.client.bucket_exists(bucket_name):
             self.client.make_bucket(bucket_name)
@@ -138,6 +163,71 @@ class ObjectStorageClient:
             size_bytes=size_bytes,
             content_type=content_type,
         )
+
+
+    def create_multipart_upload(self, bucket: str, object_key: str, content_type: str | None = None) -> str:
+        self.ensure_bucket(bucket)
+        response = self._s3_client().create_multipart_upload(
+            Bucket=bucket,
+            Key=object_key,
+            ContentType=content_type or "application/octet-stream",
+        )
+        return str(response["UploadId"])
+
+    def presign_upload_part(
+        self,
+        bucket: str,
+        object_key: str,
+        upload_id: str,
+        part_number: int,
+        expires_seconds: int,
+    ) -> str:
+        return self._s3_client(public=True).generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": bucket,
+                "Key": object_key,
+                "UploadId": upload_id,
+                "PartNumber": part_number,
+            },
+            ExpiresIn=expires_seconds,
+        )
+
+    def complete_multipart_upload(
+        self,
+        bucket: str,
+        object_key: str,
+        upload_id: str,
+        parts: list[dict[str, object]],
+    ) -> StorageObject:
+        response = self._s3_client().complete_multipart_upload(
+            Bucket=bucket,
+            Key=object_key,
+            UploadId=upload_id,
+            MultipartUpload={
+                "Parts": [
+                    {"PartNumber": int(part["part_number"]), "ETag": str(part["etag"])}
+                    for part in parts
+                ]
+            },
+        )
+        stat = self.client.stat_object(bucket, object_key)
+        return StorageObject(
+            bucket=bucket,
+            key=object_key,
+            size_bytes=int(getattr(stat, "size", 0) or 0),
+            etag=response.get("ETag"),
+        )
+
+    def abort_multipart_upload(self, bucket: str, object_key: str, upload_id: str) -> None:
+        self._s3_client().abort_multipart_upload(Bucket=bucket, Key=object_key, UploadId=upload_id)
+
+    def delete_object(self, bucket: str, object_key: str) -> None:
+        self.client.remove_object(bucket, object_key)
+
+    def iter_object_chunks(self, bucket: str, object_key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        stream = self.open_object_stream(bucket, object_key)
+        yield from stream.iter_chunks(chunk_size)
 
     def upload_evidence(
         self,

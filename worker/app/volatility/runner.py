@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 from time import perf_counter
 
@@ -13,10 +14,11 @@ from app.storage.keys import normalize_plugin_name_part
 from app.tasks import status as task_status
 from app.volatility.commands import build_volatility_command
 from app.volatility.registry import PluginDefinition
-from app.yara.rules import resolve_yara_rules_path
+from app.yara.rules import profile_is_heavy_yara, resolve_yara_rules_path, yara_pack_for_profile
 
 
 YARA_PLUGIN_NAMES = {"windows.vadyarascan", "yarascan", "linux.vmayarascan"}
+MAX_STDERR_CAPTURE_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,34 @@ def short_error_message(message: str, max_length: int = 500) -> str:
 
 def raw_output_path_for_plugin(raw_dir: Path, plugin_name: str) -> Path:
     return raw_dir / f"{normalize_plugin_name_part(plugin_name)}.json"
+
+
+def stderr_path_for_plugin(raw_dir: Path, plugin_name: str) -> Path:
+    return raw_dir / f"{normalize_plugin_name_part(plugin_name)}.stderr.txt"
+
+
+def read_text_excerpt(path: Path, max_bytes: int = MAX_STDERR_CAPTURE_BYTES) -> str:
+    if not path.exists():
+        return ""
+    with path.open("rb") as handle:
+        data = handle.read(max_bytes)
+        truncated = handle.read(1) != b""
+    text = data.decode("utf-8", errors="replace")
+    if truncated:
+        text = f"{text}\n[stderr truncated to {max_bytes} bytes]"
+    return text
+
+
+def terminate_process(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+        return
+    except Exception:
+        pass
+    try:
+        process.kill()
+    except Exception:
+        pass
 
 
 def is_yara_plugin(plugin_name: str) -> bool:
@@ -137,93 +167,99 @@ def run_volatility_plugin(
     evidence_path: Path,
     raw_dir: Path,
     settings: Settings | None = None,
-    process_runner=subprocess.run,
+    plugin_profile: str | None = None,
+    process_runner=subprocess.Popen,
 ) -> VolatilityRunResult:
     runtime_settings = settings or get_settings()
     output_path = raw_output_path_for_plugin(raw_dir, plugin.name)
+    stderr_path = stderr_path_for_plugin(raw_dir, plugin.name)
     timeout_seconds = plugin_timeout_seconds(plugin, runtime_settings)
     plugin_extra_data = {
         "requires_yara_rules": plugin.requires_yara_rules,
         "plugin_name": plugin.name,
         "is_yara_plugin": is_yara_plugin(plugin.name),
+        "plugin_profile": plugin_profile,
         "timeout_seconds": timeout_seconds,
+        "stderr_capture_limit_bytes": MAX_STDERR_CAPTURE_BYTES,
     }
 
     if not plugin.implemented:
         return skipped_plugin_result(raw_dir, plugin, "plugin is registered but not implemented for execution yet", plugin_extra_data)
     yara_rules_path = None
     if plugin.requires_yara_rules:
-        yara_rules_path = resolve_yara_rules_path(runtime_settings)
+        selected_pack = yara_pack_for_profile(plugin_profile)
+        yara_rules_path = resolve_yara_rules_path(runtime_settings, plugin_profile=plugin_profile)
+        plugin_extra_data.update(
+            {
+                "yara_rule_pack": selected_pack,
+                "heavy_yara_profile": profile_is_heavy_yara(plugin_profile),
+            }
+        )
         if not yara_rules_path:
+            skip_reason = (
+                f"YARA rule pack {selected_pack} is required for this profile; run scripts/rules/import_third_party_rules.py, "
+                "validate_yara_rules.py, and build_yara_pack.py before starting this profile"
+                if selected_pack
+                else "YARA rule configuration is required for this plugin"
+            )
             plugin_extra_data.update(
                 {
                     "yara_rules_configured": False,
-                    "skip_reason": "YARA rule configuration is required for this plugin",
+                    "skip_reason": skip_reason,
                 }
             )
-            return skipped_plugin_result(raw_dir, plugin, "YARA rule configuration is required for this plugin", plugin_extra_data)
-        plugin_extra_data.update({"yara_rules_configured": True, "yara_rules_source": Path(yara_rules_path).name})
+            return skipped_plugin_result(raw_dir, plugin, skip_reason, plugin_extra_data)
+        plugin_extra_data.update(
+            {
+                "yara_rules_configured": True,
+                "yara_rules_source": Path(yara_rules_path).name,
+                "yara_rules_path": str(yara_rules_path),
+            }
+        )
 
     command = build_volatility_command(runtime_settings, plugin, evidence_path, raw_dir, yara_rules_path=yara_rules_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     started_at = perf_counter()
+    process: subprocess.Popen | None = None
     try:
-        completed = process_runner(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
+        with output_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+            process = process_runner(
+                command,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                text=False,
+                start_new_session=True,
+            )
+            return_code = process.wait(timeout=timeout_seconds)
         duration_ms = duration_ms_since(started_at)
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
-        status = task_status.STATUS_COMPLETED if completed.returncode == 0 else task_status.STATUS_FAILED
-        error_message = None if completed.returncode == 0 else short_error_message(stderr or "Volatility plugin failed")
-        write_raw_wrapper(
-            output_path,
-            plugin,
-            command,
-            status,
-            completed.returncode,
-            stdout,
-            stderr,
-            error_message,
-            duration_ms,
-            timed_out=False,
-            extra_data=plugin_extra_data,
-        )
+        stderr = read_text_excerpt(stderr_path)
+        status = task_status.STATUS_COMPLETED if return_code == 0 else task_status.STATUS_FAILED
+        error_message = None if return_code == 0 else short_error_message(stderr or "Volatility plugin failed")
         return VolatilityRunResult(
             plugin_name=plugin.name,
             source_plugin=plugin.name,
             status=status,
             raw_output_path=output_path,
             command=command,
-            return_code=completed.returncode,
-            stdout=stdout,
+            return_code=return_code,
+            stdout="",
             stderr=stderr,
             error_message=error_message,
             duration_ms=duration_ms,
             extra_data=plugin_extra_data,
         )
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired:
+        if process is not None:
+            terminate_process(process)
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                pass
         duration_ms = duration_ms_since(started_at)
-        stdout = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode(errors="replace")
-        stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode(errors="replace")
+        stderr = read_text_excerpt(stderr_path)
         error_message = short_error_message(f"Volatility plugin timed out after {timeout_seconds}s")
         timeout_extra_data = {**plugin_extra_data, "timeout_reason": "plugin_timeout"}
-        write_raw_wrapper(
-            output_path,
-            plugin,
-            command,
-            task_status.STATUS_FAILED,
-            None,
-            stdout,
-            stderr,
-            error_message,
-            duration_ms,
-            timed_out=True,
-            extra_data=timeout_extra_data,
-        )
+        output_path.touch(exist_ok=True)
         return VolatilityRunResult(
             plugin_name=plugin.name,
             source_plugin=plugin.name,
@@ -231,7 +267,7 @@ def run_volatility_plugin(
             raw_output_path=output_path,
             command=command,
             return_code=None,
-            stdout=stdout,
+            stdout="",
             stderr=stderr,
             error_message=error_message,
             duration_ms=duration_ms,

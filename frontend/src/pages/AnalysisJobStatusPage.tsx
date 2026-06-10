@@ -52,6 +52,7 @@ import {
   sortFindingsByRisk,
 } from "../utils/results";
 import { isActiveJobStatus, statusTone } from "../utils/status";
+import type { BadgeTone } from "../utils/status";
 
 function terminalResultEmptyMessage(jobStatus: string, completedMessage: string): string {
   const normalized = jobStatus.toLowerCase();
@@ -71,8 +72,17 @@ const YARA_PLUGIN_NAMES = new Set(["windows.vadyarascan", "yarascan", "linux.vma
 
 const PROFILE_LABELS: Record<string, string> = {
   windows_default: "Standard Windows triage",
-  windows_memory_yara: "Windows memory + YARA triage",
+  windows_memory_yara: "Elastic YARA (compatibility alias)",
+  windows_memory_yara_elastic: "Elastic YARA",
+  windows_memory_yara_neo23x0: "Neo23x0 Signature Base YARA",
+  windows_memory_yara_third_party_all: "Third-party YARA All (slow)",
 };
+const YARA_PROFILE_NAMES = new Set([
+  "windows_memory_yara",
+  "windows_memory_yara_elastic",
+  "windows_memory_yara_neo23x0",
+  "windows_memory_yara_third_party_all",
+]);
 
 function analysisProfileLabel(profile: string | null | undefined): string {
   const normalized = normalizedPluginProfile(profile);
@@ -130,7 +140,7 @@ function yaraStatusMessage(job: AnalysisJob, pluginResults: PluginResult[], hasY
   const pluginProfile = normalizedPluginProfile(job.plugin_profile);
   if (!pluginProfile) return "No YARA profile was recorded for this job.";
   if (pluginProfile === "windows_default") return "YARA was not selected for this analysis profile.";
-  if (pluginProfile === "windows_memory_yara") {
+  if (YARA_PROFILE_NAMES.has(pluginProfile)) {
     return "YARA was requested, but YARA plugin status is not available through the current results APIs.";
   }
   return "YARA status is not available for this analysis profile.";
@@ -141,12 +151,169 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function textValue(value: unknown, fallback = "Not recorded"): string {
+  if (value === null || value === undefined) return fallback;
+  if (Array.isArray(value)) return value.map((item) => textValue(item, "")).filter(Boolean).join(", ") || fallback;
+  if (typeof value === "object") return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function arrayText(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => textValue(item, "")).filter(Boolean);
+}
+
+function copyToClipboard(value: unknown): void {
+  const text = textValue(value, "");
+  if (!text || !navigator.clipboard) return;
+  void navigator.clipboard.writeText(text);
+}
+
+function CopyButton({ value, label = "Copy" }: { value: unknown; label?: string }) {
+  const text = textValue(value, "");
+  if (!text) return null;
+  return (
+    <button className="copy-button" type="button" onClick={() => copyToClipboard(text)} aria-label={`${label}: ${text}`}>
+      {label}
+    </button>
+  );
+}
+
+function confidenceTone(confidence: string): BadgeTone {
+  if (confidence === "probable_malware") return "danger";
+  if (confidence === "context_only") return "neutral";
+  return "warning";
+}
+
 function numericPid(value: unknown): number | null {
   if (typeof value === "number" && Number.isInteger(value)) return value;
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) return null;
   return Number(trimmed);
+}
+
+function pidFromFinding(finding: RiskFinding): number | null {
+  const extraData = asRecord(finding.extra_data);
+  return numericPid(extraData.pid);
+}
+
+function addressRange(region: MemoryRegionArtifact): string {
+  if (region.start_address && region.end_address) return `${region.start_address}-${region.end_address}`;
+  return "Not recorded";
+}
+
+function networkEndpoint(network: NetworkArtifact): string {
+  const remote = network.remote_address ? `${network.remote_address}:${network.remote_port ?? ""}` : "remote unknown";
+  return remote;
+}
+
+function iocRole(ioc: IOC): string {
+  return textValue(asRecord(ioc.extra_data).ioc_role, "investigation_artifact");
+}
+
+function TopActionableDetections({
+  findings,
+  memoryRegions,
+  networkArtifacts,
+  yaraMatches,
+  onFindingUpdated,
+}: {
+  findings: RiskFinding[];
+  memoryRegions: MemoryRegionArtifact[];
+  networkArtifacts: NetworkArtifact[];
+  yaraMatches: YaraMatchArtifact[];
+  onFindingUpdated: (finding: RiskFinding) => void;
+}) {
+  const [expandedFindingId, setExpandedFindingId] = useState<string | null>(null);
+  const visibleFindings = findings.slice(0, 10);
+
+  return (
+    <div className="actionable-list">
+      {visibleFindings.map((finding) => {
+        const extraData = asRecord(finding.extra_data);
+        const pid = pidFromFinding(finding);
+        const confidence = textValue(extraData.detection_confidence || extraData.finding_intent, "suspicious");
+        const evidenceGroups = arrayText(extraData.evidence_groups);
+        const yaraRules = arrayText(extraData.yara_rules).slice(0, 8);
+        const pidMemoryRegions = pid === null ? [] : memoryRegions.filter((region) => region.pid === pid).slice(0, 5);
+        const pidNetworks = pid === null ? [] : networkArtifacts.filter((network) => network.pid === pid && network.remote_address).slice(0, 5);
+        const pidYaraRules = pid === null ? [] : [...new Set(yaraMatches
+          .filter((match) => pidFromTargetIdentifier(match.target_identifier) === pid)
+          .map((match) => match.rule_name)
+          .filter(Boolean))]
+          .slice(0, 8);
+        const displayedRules = yaraRules.length > 0 ? yaraRules : pidYaraRules;
+        const expanded = expandedFindingId === finding.id;
+        const commandLine = textValue(extraData.command_line, "");
+
+        return (
+          <article className={`actionable-card verdict-${confidence}`} key={finding.id}>
+            <div className="actionable-header">
+              <div>
+                <h3>{textValue(extraData.process_name, finding.title)} {pid !== null && <span className="muted">(PID {pid})</span>}</h3>
+                <p className="muted">{finding.title}</p>
+              </div>
+              <div className="actionable-badges">
+                <Badge tone={statusTone(finding.effective_severity ?? finding.severity)}>{finding.effective_severity ?? finding.severity}</Badge>
+                <Badge tone={confidenceTone(confidence)}>{confidence.replaceAll("_", " ")}</Badge>
+              </div>
+            </div>
+
+            <dl className="actionable-meta">
+              <div><dt>Score</dt><dd>{finding.score}</dd></div>
+              <div><dt>PID</dt><dd>{pid ?? "Not recorded"} <CopyButton value={pid} /></dd></div>
+              <div><dt>Image path</dt><dd><code>{textValue(extraData.image_path)}</code> <CopyButton value={extraData.image_path} /></dd></div>
+              <div><dt>Evidence</dt><dd>{evidenceGroups.length > 0 ? evidenceGroups.join(", ") : "Not recorded"}</dd></div>
+            </dl>
+
+            {commandLine && (
+              <div className="evidence-line">
+                <strong>Command line</strong>
+                <code>{commandLine}</code>
+                <CopyButton value={commandLine} label="Copy command" />
+              </div>
+            )}
+
+            <div className="evidence-pill-row">
+              {displayedRules.map((rule) => (
+                <span className="evidence-pill" key={rule}>YARA: {rule} <CopyButton value={rule} /></span>
+              ))}
+              {pidMemoryRegions.map((region) => (
+                <span className="evidence-pill" key={region.id}>Region: {addressRange(region)} <CopyButton value={addressRange(region)} /></span>
+              ))}
+              {pidNetworks.map((network) => (
+                <span className="evidence-pill" key={network.id}>Endpoint: {networkEndpoint(network)} <CopyButton value={networkEndpoint(network)} /></span>
+              ))}
+            </div>
+
+            <p className="recommendation-text">{textValue(finding.recommendation)}</p>
+
+            <details className="evidence-details" open={expanded} onToggle={(event) => setExpandedFindingId(event.currentTarget.open ? finding.id : null)}>
+              <summary>Evidence chain and review controls</summary>
+              <div className="evidence-detail-grid">
+                <div>
+                  <h4>YARA rules</h4>
+                  {displayedRules.length > 0 ? displayedRules.map((rule) => <p key={rule}><code>{rule}</code> <CopyButton value={rule} /></p>) : <p className="muted">Not recorded</p>}
+                </div>
+                <div>
+                  <h4>Memory regions</h4>
+                  {pidMemoryRegions.length > 0 ? pidMemoryRegions.map((region) => <p key={region.id}><code>{addressRange(region)}</code> {textValue(region.protection, "")} <CopyButton value={addressRange(region)} /></p>) : <p className="muted">Not recorded in loaded rows</p>}
+                </div>
+                <div>
+                  <h4>Network endpoints</h4>
+                  {pidNetworks.length > 0 ? pidNetworks.map((network) => <p key={network.id}><code>{networkEndpoint(network)}</code> {textValue(network.state, "")} <CopyButton value={networkEndpoint(network)} /></p>) : <p className="muted">Not recorded in loaded rows</p>}
+                </div>
+              </div>
+              <FindingTable caption="Underlying process summary row" findings={[finding]} limit={1} onFindingUpdated={onFindingUpdated} />
+            </details>
+          </article>
+        );
+      })}
+      {findings.length > visibleFindings.length && <p className="table-note">Showing {visibleFindings.length} of {findings.length} process-level detections. Use the process summary table for the rest.</p>}
+    </div>
+  );
 }
 
 function pidFromTargetIdentifier(value: string | null | undefined): number | null {
@@ -416,10 +583,13 @@ export function AnalysisJobStatusPage() {
   const moduleFindings = useMemo(() => sortedFindings.filter(isModuleOrPathFinding), [sortedFindings]);
   const memoryFindings = useMemo(() => sortedFindings.filter(isMemoryRegionFinding), [sortedFindings]);
   const yaraFindings = useMemo(() => sortedFindings.filter(isYaraFinding), [sortedFindings]);
+  const supportingFindings = useMemo(() => sortedFindings.filter((finding) => !isProcessRiskSummary(finding)), [sortedFindings]);
   const networkIocs = useMemo(() => iocs.filter(isNetworkIOC), [iocs]);
   const moduleIocs = useMemo(() => iocs.filter(isModuleOrPathIOC), [iocs]);
   const memoryIocs = useMemo(() => iocs.filter(isMemoryRegionIOC), [iocs]);
   const yaraIocs = useMemo(() => iocs.filter(isYaraIOC), [iocs]);
+  const threatIocs = useMemo(() => iocs.filter((ioc) => iocRole(ioc) === "threat_ioc"), [iocs]);
+  const investigationArtifactIocs = useMemo(() => iocs.filter((ioc) => iocRole(ioc) !== "threat_ioc"), [iocs]);
   const yaraMessage = job ? yaraStatusMessage(job, pluginResults, yaraFindings.length > 0 || yaraIocs.length > 0 || yaraMatches.length > 0) : "No YARA profile was recorded for this job.";
   const pidOptions = useMemo(
     () => collectPidOptions(findings, processArtifacts, commandArtifacts, networkArtifacts, moduleArtifacts, memoryRegions, yaraMatches),
@@ -528,13 +698,29 @@ export function AnalysisJobStatusPage() {
       </Card>
 
       <ResultSection
-        title="Top suspicious findings"
+        title="Top Actionable Detections"
         loading={findingLoading}
         error={findingError}
-        empty={sortedFindings.length === 0}
+        empty={processRiskSummaries.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no risk findings recorded through the current APIs.")}
       >
-        <FindingTable caption="Critical and high findings are shown first" findings={sortedFindings} limit={20} onFindingUpdated={handleFindingUpdated} />
+        <TopActionableDetections
+          findings={processRiskSummaries}
+          memoryRegions={memoryRegions}
+          networkArtifacts={networkArtifacts}
+          onFindingUpdated={handleFindingUpdated}
+          yaraMatches={yaraMatches}
+        />
+      </ResultSection>
+
+      <ResultSection
+        title="Supporting risk findings"
+        loading={findingLoading}
+        error={findingError}
+        empty={supportingFindings.length === 0}
+        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no supporting risk findings recorded through the current APIs.")}
+      >
+        <FindingTable caption="Supporting raw and deduplicated findings; process-level summaries are shown above" findings={supportingFindings} limit={20} onFindingUpdated={handleFindingUpdated} />
       </ResultSection>
 
       <ResultSection
@@ -689,16 +875,29 @@ export function AnalysisJobStatusPage() {
       </ResultSection>
 
       <ResultSection
-        title="IOC table"
+        title="Threat-Oriented IOCs"
         actions={iocExportActions}
         loading={iocLoading}
         error={iocError}
-        empty={iocs.length === 0}
-        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no IOC records extracted.")}
+        empty={threatIocs.length === 0}
+        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no threat-oriented IOC records extracted.")}
       >
         <div className="page-stack compact-stack">
-          <IocTable caption="All IOC records for this analysis job" iocs={iocs} limit={100} />
-          <p className="muted">IOC export downloads are served by RAMSight through the backend. If an export is not available yet, the download endpoint will return a clear error.</p>
+          <IocTable caption="Threat-oriented IOC records for this analysis job" iocs={threatIocs} limit={100} />
+          <p className="muted">Threat-oriented IOCs emphasize public endpoints, suspicious paths, and malware-specific YARA rules with correlation. Exports still include all stored IOC records.</p>
+        </div>
+      </ResultSection>
+
+      <ResultSection
+        title="Investigation Artifacts"
+        loading={iocLoading}
+        error={iocError}
+        empty={investigationArtifactIocs.length === 0}
+        emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no investigation artifact IOC records extracted.")}
+      >
+        <div className="page-stack compact-stack">
+          <IocTable caption="Contextual investigation artifacts" iocs={investigationArtifactIocs} limit={100} />
+          <p className="muted">PIDs, plugin references, memory regions, and generic YARA hits are shown as investigation artifacts, not direct threat IOCs.</p>
         </div>
       </ResultSection>
 

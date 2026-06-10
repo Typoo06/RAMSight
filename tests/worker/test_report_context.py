@@ -243,6 +243,31 @@ def test_report_context_groups_yara_rules_and_counts() -> None:
     assert context["yara_summary"][0]["sample_offsets"] == ["0x10", "0x20"]
 
 
+def test_report_context_separates_threat_iocs_from_investigation_artifacts() -> None:
+    case, evidence, job = base_rows()
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=[],
+        iocs=[
+            {"ioc_type": "network_endpoint", "value": "8.8.8.8:443", "confidence": 85, "source_plugin": "windows.netscan", "extra_data": {"ioc_role": "threat_ioc"}},
+            {"ioc_type": "yara_rule", "value": "CobaltStrike_Beacon", "confidence": 90, "source_plugin": "windows.vadyarascan", "extra_data": {"ioc_role": "threat_ioc"}},
+            {"ioc_type": "pid", "value": "14484", "confidence": 60, "source_plugin": "windows.pslist", "extra_data": {"ioc_role": "investigation_artifact"}},
+            {"ioc_type": "memory_region", "value": "14484:0x1-0x2", "confidence": 60, "source_plugin": "windows.malfind", "extra_data": {"ioc_role": "investigation_artifact"}},
+            {"ioc_type": "plugin_reference", "value": "windows.malfind", "confidence": 45, "source_plugin": "windows.malfind", "extra_data": {"ioc_role": "investigation_artifact"}},
+            {"ioc_type": "yara_rule", "value": "Generic_PE_Header", "confidence": 45, "source_plugin": "windows.vadyarascan", "extra_data": {"ioc_role": "investigation_artifact"}},
+        ],
+        generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    assert {row["ioc_type"] for row in context["threat_ioc_summary"]} == {"network_endpoint", "yara_rule"}
+    investigation_types = {row["ioc_type"] for row in context["investigation_artifact_summary"]}
+    assert {"pid", "memory_region", "plugin_reference", "yara_rule"} <= investigation_types
+
+
 def test_report_context_deduplicates_and_caps_top_findings_for_display() -> None:
     case, evidence, job = base_rows()
     artifacts = {"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []}

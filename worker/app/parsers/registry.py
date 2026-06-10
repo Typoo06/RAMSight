@@ -1,7 +1,7 @@
 # Parser registry and dispatch for Volatility raw wrappers.
 
 from app.parsers.commands import parse_command_artifacts
-from app.parsers.common import ParsedArtifactBatch, ParserError, extract_rows, load_raw_wrapper, parse_stdout_json
+from app.parsers.common import ParsedArtifactBatch, ParserError, extract_rows, load_json_file, load_raw_wrapper, parse_stdout_json
 from app.parsers.memory_regions import parse_memory_region_artifacts
 from app.parsers.modules import parse_handles_as_no_artifacts, parse_module_artifacts
 from app.parsers.network import parse_network_artifacts
@@ -24,6 +24,19 @@ PARSER_REGISTRY = {
 
 def get_parser(source_plugin: str):
     return PARSER_REGISTRY.get(source_plugin)
+
+
+def parse_raw_output_file(path, source_plugin: str | None, status: str = "completed") -> ParsedArtifactBatch:
+    if status != "completed":
+        return ParsedArtifactBatch("", [])
+    parser = get_parser(source_plugin or "")
+    if parser is None:
+        return ParsedArtifactBatch("", [])
+    rows = extract_rows(load_json_file(path))
+    try:
+        return parser(rows, source_plugin or "")
+    except Exception as exc:  # noqa: BLE001 - caller stores a short parse error on the plugin result.
+        raise ParserError(str(exc)) from exc
 
 
 def parse_raw_wrapper(path) -> ParsedArtifactBatch:

@@ -1,71 +1,78 @@
 # RAMSight YARA Rules
 
-RAMSight uses YARA as a defensive memory-triage aid. In the thesis demo workflow, the `windows_memory_yara` analysis profile runs the usual Windows Volatility plugins and adds `windows.vadyarascan` so YARA rules can scan process memory.
+RAMSight uses YARA as a defensive memory-triage aid. Active runtime YARA profiles use validated third-party rule packs only; the old RAMSight demo rules are archived under `rules/yara/disabled/archive/` and are not used for detection.
 
-The active demo rule file is:
+## Runtime Profiles
 
-```text
-rules/yara/ramsight_memory_triage_demo.yar
-```
+- `windows_default`: standard Windows Volatility triage, no YARA.
+- `windows_memory_yara`: backward-compatible alias for the Elastic third-party YARA pack.
+- `windows_memory_yara_elastic`: recommended demo profile using the compiled Elastic YARA pack.
+- `windows_memory_yara_neo23x0`: optional profile using the compiled Neo23x0 Signature Base YARA pack.
+- `windows_memory_yara_third_party_all`: optional heavy profile using Elastic and Neo23x0 together. Expect slower scans and higher memory use on large dumps.
 
-In Docker development, the worker receives this path through:
-
-```text
-VOLATILITY_YARA_RULES_PATH=/rules/yara/ramsight_memory_triage_demo.yar
-```
-
-## Rule Groups
-
-- Suspicious PowerShell/script-in-memory indicators.
-- Process injection API clusters.
-- Reflective-loading and PE-like memory context.
-- Credential dumping context strings.
-- Living-off-the-land command traces.
-- Packed or obfuscated PE-like memory context.
-
-The rules are heuristic. They require multiple related strings where possible and include `false_positive_note` metadata because legitimate admin tools, EDR, debuggers, installers, and forensic tools can expose similar strings in memory.
-
-## Metadata
-
-Every project YARA rule should include:
+The active pack files are generated into:
 
 ```text
-description
-author = "RAMSight"
-category
-severity
-scope = "memory"
-thesis_topic = "memory-only malware triage"
-false_positive_note
-updated
+rules/yara/compiled/elastic_yara.yar
+rules/yara/compiled/neo23x0_yara.yar
+rules/yara/compiled/third_party_yara_all.yar
 ```
 
-Additional metadata such as `confidence`, `noisy`, `requires_correlation`, and `performance` helps RAMSight explain triage confidence in findings and reports.
+In Docker development, the compatibility fallback points at the Elastic compiled pack:
 
-## Testing
+```text
+VOLATILITY_YARA_RULES_PATH=/rules/yara/compiled/elastic_yara.yar
+```
 
-Compile and statically review the YARA rules with:
+Profile-based worker execution resolves the pack from the selected profile, so `windows_memory_yara` does not use the archived RAMSight demo rules.
+
+## Third-Party Sources
+
+- Elastic protections-artifacts: YARA rules under Elastic License 2.0.
+- Neo23x0/signature-base: YARA signatures and IOC data under Detection Rule License 1.1.
+- SigmaHQ/sigma: Sigma YAML rules under Detection Rule License 1.1. These are imported as reference/future correlation rules only and are not passed to Volatility YARA scanning.
+
+Preserve upstream rule files, comments, author metadata, README files, license files, and notices. Do not silently edit third-party rules. If a rule fails compilation, quarantine it through the validation manifest and exclude it from active packs.
+
+## Import And Build
+
+Dry-run the import plan:
 
 ```bash
-docker compose -f docker-compose.dev.yml exec worker pytest /tests/worker/test_yara_rules.py
+python scripts/rules/import_third_party_rules.py --dry-run
 ```
 
-Or, from a Python environment with `yara-python` installed:
+Import sources when network access is available:
 
 ```bash
-python - <<'PY'
-import yara
-yara.compile(filepath="rules/yara/ramsight_memory_triage_demo.yar")
-print("YARA compile ok")
-PY
+python scripts/rules/import_third_party_rules.py --source elastic
+python scripts/rules/import_third_party_rules.py --source neo23x0_signature_base
+python scripts/rules/import_third_party_rules.py --source sigmahq
+```
+
+Validate each YARA file independently and quarantine compile failures:
+
+```bash
+python scripts/rules/validate_yara_rules.py
+```
+
+Build active runtime packs from validated files:
+
+```bash
+python scripts/rules/build_yara_pack.py --pack elastic_yara
+python scripts/rules/build_yara_pack.py --pack neo23x0_yara
+python scripts/rules/build_yara_pack.py --pack third_party_yara_all
 ```
 
 ## Reading Results
 
-YARA matches are stored as `yara_matches`, converted into risk findings through the detection engine, and shown in the technical HTML report. A YARA hit is not a final malware verdict. It should be correlated with `malfind`, process ancestry, command line, network activity, loaded modules, and analyst notes.
+YARA matches are stored as `yara_matches`, enriched with source-pack metadata when manifest data is available, converted into cautious risk findings, and shown in the technical HTML report. A YARA hit is not a final malware verdict. Correlate it with `malfind`, process ancestry, command line, network activity, loaded modules, and analyst notes.
+
+Raw YARA match count does not linearly inflate process risk. RAMSight groups one process plus one rule as one scoring signal; broad or generic rules should remain low/medium unless correlated with stronger evidence.
 
 ## Limitations
 
-- The rules are lab/demo heuristics, not production malware signatures.
-- False positives are expected, especially for broad PE, packed-file, admin-tool, debugger, and EDR memory contexts.
+- Third-party YARA packs can be noisy and expensive on large memory dumps.
+- `windows_memory_yara_third_party_all` is optional and should be selected deliberately.
+- Sigma rules are reference material only in this task; RAMSight does not run a Sigma engine yet.
 - PDF export is not implemented in the current demo build; use the HTML report and IOC JSON/CSV exports.

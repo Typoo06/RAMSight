@@ -1,5 +1,10 @@
 export type OSFamily = "windows" | "linux" | "unknown" | string;
-export type AnalysisPluginProfile = "windows_default" | "windows_memory_yara";
+export type AnalysisPluginProfile =
+  | "windows_default"
+  | "windows_memory_yara"
+  | "windows_memory_yara_elastic"
+  | "windows_memory_yara_neo23x0"
+  | "windows_memory_yara_third_party_all";
 export type ReviewStatus = "new" | "investigating" | "reviewed";
 export type AnalystVerdict = "true_positive" | "false_positive" | "benign" | "suspicious" | "needs_more_evidence" | "ignored";
 export type Severity = "low" | "medium" | "high" | "critical" | string;

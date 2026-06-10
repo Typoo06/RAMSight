@@ -34,6 +34,6 @@ The default chunk size is 16 MiB. Browser upload temporarily needs disk space ro
 4. Confirm upload progress shows chunk count, uploaded bytes, and percentage.
 5. Monitor `vmmemwsl` and Docker resource usage while upload runs.
 6. Confirm RAMSight creates evidence metadata with size, MD5, and SHA256.
-7. Start the desired analysis profile, such as `windows_memory_yara`, after upload completes.
+7. Start the desired analysis profile, such as `windows_memory_yara_elastic`, after upload completes.
 
 If an upload is cancelled, RAMSight asks the backend to remove the temporary upload session. Expired or failed sessions may still need operational cleanup from the configured temp directory.
