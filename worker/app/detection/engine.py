@@ -91,6 +91,17 @@ BROAD_YARA_TERMS = {
     "shellcode",
     "suspicious",
 }
+MALFIND_MEMORY_PLUGINS = {
+    "windows.malfind",
+    "windows.malware.malfind",
+    "linux.malfind",
+    "linux.malware.malfind",
+    "linux.vmayarascan",
+}
+VAD_CONTEXT_PLUGINS = {
+    "windows.vadinfo",
+    "windows.vadwalk",
+}
 
 
 def normalize_process_name(value: str | None) -> str:
@@ -270,7 +281,18 @@ def memory_region_is_executable(artifact: dict) -> bool:
     return bool(artifact.get("is_executable")) or "EXECUTE" in protection.upper()
 
 
+def memory_region_role(artifact: dict) -> str:
+    source_plugin = str(artifact.get("source_plugin") or "").lower()
+    if source_plugin in MALFIND_MEMORY_PLUGINS:
+        return "malfind_suspicious_region"
+    if source_plugin in VAD_CONTEXT_PLUGINS:
+        return "executable_vad_context" if memory_region_is_executable(artifact) else "vad_context_region"
+    return "memory_region"
+
+
 def memory_region_is_suspicious(artifact: dict) -> bool:
+    if str(artifact.get("source_plugin") or "").lower() in VAD_CONTEXT_PLUGINS:
+        return False
     return memory_region_is_executable(artifact)
 
 
@@ -333,6 +355,7 @@ def memory_extra(artifact: dict, reason: str, linked_artifacts: dict | None = No
         "protection": artifact.get("protection"),
         "is_executable": artifact.get("is_executable"),
         "is_private": artifact.get("is_private"),
+        "memory_region_role": memory_region_role(artifact),
         "reasoning": reason,
         "requires_validation": True,
         **intent_extra("suspicious_triage"),

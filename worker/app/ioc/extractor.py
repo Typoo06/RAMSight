@@ -55,6 +55,8 @@ USER_WRITABLE_PATH_FRAGMENTS = {
     "/home/",
 }
 WHITESPACE_RE = re.compile(r"\s+")
+MALFIND_MEMORY_PLUGINS = {"windows.malfind", "windows.malware.malfind", "linux.malfind", "linux.malware.malfind"}
+VAD_CONTEXT_PLUGINS = {"windows.vadinfo", "windows.vadwalk"}
 
 
 def extract_iocs(artifacts: dict[str, list[dict]], risk_findings: list[dict], context: dict) -> list[IOCRecordDraft]:
@@ -455,11 +457,22 @@ def yara_has_correlation(findings: list[dict]) -> bool:
         extra = finding.get("extra_data") or {}
         if extra.get("linked_memory_region_artifact_ids"):
             return True
-        groups = extra.get("evidence_groups") or []
-        if isinstance(groups, list) and any(group in groups for group in ["memory_region", "network_endpoint", "suspicious_command", "suspicious_module"]):
+        linked_artifacts = extra.get("linked_artifacts") or {}
+        if isinstance(linked_artifacts, dict) and any(
+            linked_artifacts.get(key)
+            for key in [
+                "memory_region_artifact_id",
+                "network_artifact_id",
+                "command_artifact_id",
+                "module_artifact_id",
+            ]
+        ):
             return True
-        confidence = str(extra.get("detection_confidence") or "").lower()
-        if confidence == "probable_malware":
+        groups = extra.get("evidence_groups") or []
+        if isinstance(groups, list) and any(
+            group in groups
+            for group in ["memory_region", "network_endpoint", "suspicious_command", "suspicious_module", "module_context"]
+        ):
             return True
     return False
 
@@ -514,11 +527,14 @@ def extract_memory_region_iocs(rows: list[dict], risk_index: dict[tuple[str, str
     iocs = []
     for index, row in enumerate(rows, start=1):
         findings = linked_findings(risk_index, MEMORY_REGION_TABLE, row)
-        suspicious = bool(row.get("is_executable")) or row.get("source_plugin") in {"windows.malfind", "linux.vmayarascan"}
+        source_plugin = str(row.get("source_plugin") or "").lower()
+        suspicious = source_plugin in MALFIND_MEMORY_PLUGINS
         if not suspicious and not findings:
             continue
         value = memory_region_value(row, index)
         severity = severity_from_findings(findings, "high" if suspicious else "medium")
+        if source_plugin in VAD_CONTEXT_PLUGINS:
+            severity = "low" if not findings else min(severity, "medium", key=lambda item: {"low": 1, "medium": 2, "high": 3, "critical": 4}[item])
         append_if_present(
             iocs,
             make_ioc(

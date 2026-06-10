@@ -224,6 +224,33 @@ function iocRole(ioc: IOC): string {
   return textValue(asRecord(ioc.extra_data).ioc_role, "investigation_artifact");
 }
 
+function metricDetail(total: number | null, loaded: number, label: string): string {
+  if (total === null) return `${loaded} ${label} loaded`;
+  if (total === loaded) return `${total.toLocaleString()} total`;
+  const hidden = Math.max(total - loaded, 0);
+  return `${total.toLocaleString()} total · showing ${loaded.toLocaleString()}${hidden > 0 ? ` · ${hidden.toLocaleString()} not loaded` : ""}`;
+}
+
+interface ProcessEvidenceBundle {
+  commands: CommandArtifact[];
+  memoryRegions: MemoryRegionArtifact[];
+  modules: ModuleArtifact[];
+  networks: NetworkArtifact[];
+  yaraMatches: YaraMatchArtifact[];
+}
+
+function emptyProcessEvidence(): ProcessEvidenceBundle {
+  return { commands: [], memoryRegions: [], modules: [], networks: [], yaraMatches: [] };
+}
+
+function mergeById<T extends { id: string }>(...groups: T[][]): T[] {
+  const rows = new Map<string, T>();
+  for (const group of groups) {
+    for (const row of group) rows.set(row.id, row);
+  }
+  return [...rows.values()];
+}
+
 interface PluginCoverageRow {
   category: string;
   selected: number;
@@ -278,14 +305,20 @@ function buildPluginCoverage(pluginResults: PluginResult[]): PluginCoverageRow[]
 
 function TopActionableDetections({
   findings,
+  commands,
   memoryRegions,
+  modules,
   networkArtifacts,
+  processEvidenceByPid,
   yaraMatches,
   onFindingUpdated,
 }: {
   findings: RiskFinding[];
+  commands: CommandArtifact[];
   memoryRegions: MemoryRegionArtifact[];
+  modules: ModuleArtifact[];
   networkArtifacts: NetworkArtifact[];
+  processEvidenceByPid: Record<number, ProcessEvidenceBundle>;
   yaraMatches: YaraMatchArtifact[];
   onFindingUpdated: (finding: RiskFinding) => void;
 }) {
@@ -300,16 +333,19 @@ function TopActionableDetections({
         const confidence = textValue(extraData.detection_confidence || extraData.finding_intent, "suspicious");
         const evidenceGroups = arrayText(extraData.evidence_groups);
         const yaraRules = arrayText(extraData.yara_rules).slice(0, 8);
-        const pidMemoryRegions = pid === null ? [] : memoryRegions.filter((region) => region.pid === pid).slice(0, 5);
-        const pidNetworks = pid === null ? [] : networkArtifacts.filter((network) => network.pid === pid && network.remote_address).slice(0, 5);
-        const pidYaraRules = pid === null ? [] : [...new Set(yaraMatches
-          .filter((match) => pidFromTargetIdentifier(match.target_identifier) === pid)
+        const processEvidence = pid === null ? emptyProcessEvidence() : (processEvidenceByPid[pid] ?? emptyProcessEvidence());
+        const pidCommands = pid === null ? [] : mergeById(processEvidence.commands, commands.filter((command) => command.pid === pid)).slice(0, 3);
+        const pidMemoryRegions = pid === null ? [] : mergeById(processEvidence.memoryRegions, memoryRegions.filter((region) => region.pid === pid)).slice(0, 5);
+        const pidModules = pid === null ? [] : mergeById(processEvidence.modules, modules.filter((module) => module.pid === pid)).slice(0, 5);
+        const pidNetworks = pid === null ? [] : mergeById(processEvidence.networks, networkArtifacts.filter((network) => network.pid === pid && network.remote_address)).slice(0, 5);
+        const pidYaraMatches = pid === null ? [] : mergeById(processEvidence.yaraMatches, yaraMatches.filter((match) => pidFromYaraMatch(match) === pid));
+        const pidYaraRules = [...new Set(pidYaraMatches
           .map((match) => match.rule_name)
           .filter(Boolean))]
           .slice(0, 8);
         const displayedRules = yaraRules.length > 0 ? yaraRules : pidYaraRules;
         const expanded = expandedFindingId === finding.id;
-        const commandLine = textValue(extraData.command_line, "");
+        const commandLine = textValue(extraData.command_line, "") || textValue(pidCommands[0]?.command, "");
 
         return (
           <article className={`actionable-card verdict-${confidence}`} key={finding.id}>
@@ -362,11 +398,16 @@ function TopActionableDetections({
                 </div>
                 <div>
                   <h4>Memory regions</h4>
-                  {pidMemoryRegions.length > 0 ? pidMemoryRegions.map((region) => <p key={region.id}><code>{addressRange(region)}</code> {textValue(region.protection, "")} <CopyButton value={addressRange(region)} /></p>) : <p className="muted">Not recorded in loaded rows</p>}
+                  {pidMemoryRegions.length > 0 ? pidMemoryRegions.map((region) => <p key={region.id}><code>{addressRange(region)}</code> {textValue(region.protection, "")} <CopyButton value={addressRange(region)} /></p>) : <p className="muted">Not recorded for this PID</p>}
                 </div>
                 <div>
                   <h4>Network endpoints</h4>
-                  {pidNetworks.length > 0 ? pidNetworks.map((network) => <p key={network.id}><code>{networkEndpoint(network)}</code> {textValue(network.state, "")} <CopyButton value={networkEndpoint(network)} /></p>) : <p className="muted">Not recorded in loaded rows</p>}
+                  {pidNetworks.length > 0 ? pidNetworks.map((network) => <p key={network.id}><code>{networkEndpoint(network)}</code> {textValue(network.state, "")} <CopyButton value={networkEndpoint(network)} /></p>) : <p className="muted">Not recorded for this PID</p>}
+                </div>
+                <div>
+                  <h4>Commands and modules</h4>
+                  {pidCommands.length > 0 ? pidCommands.map((command) => <p key={command.id}><code>{textValue(command.command)}</code> <CopyButton value={command.command} /></p>) : <p className="muted">No command line artifact recorded for this PID</p>}
+                  {pidModules.length > 0 && pidModules.map((module) => <p key={module.id}><code>{textValue(module.module_name)}</code> {textValue(module.module_path, "")} <CopyButton value={module.module_path || module.module_name} /></p>)}
                 </div>
               </div>
               <FindingTable caption="Underlying process summary row" findings={[finding]} limit={1} onFindingUpdated={onFindingUpdated} />
@@ -386,6 +427,11 @@ function pidFromTargetIdentifier(value: string | null | undefined): number | nul
   if (exact) return Number(exact[0]);
   const pidLabel = trimmed.match(/^pid\s+(\d+)$/i);
   return pidLabel ? Number(pidLabel[1]) : null;
+}
+
+function pidFromYaraMatch(match: YaraMatchArtifact): number | null {
+  const extraData = asRecord(match.extra_data);
+  return numericPid(extraData.pid) ?? numericPid(extraData.process_id) ?? pidFromTargetIdentifier(match.target_identifier);
 }
 
 function collectPidOptions(
@@ -423,10 +469,13 @@ export function AnalysisJobStatusPage() {
   const [drilldownLoading, setDrilldownLoading] = useState(true);
   const [findingError, setFindingError] = useState<string | null>(null);
   const [findingLoading, setFindingLoading] = useState(true);
+  const [findingTotal, setFindingTotal] = useState<number | null>(null);
   const [findings, setFindings] = useState<RiskFinding[]>([]);
   const [focusPidText, setFocusPidText] = useState("");
+  const [highPriorityTotal, setHighPriorityTotal] = useState<number | null>(null);
   const [iocError, setIocError] = useState<string | null>(null);
   const [iocLoading, setIocLoading] = useState(true);
+  const [iocTotal, setIocTotal] = useState<number | null>(null);
   const [iocs, setIocs] = useState<IOC[]>([]);
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [loading, setLoading] = useState(true);
@@ -434,6 +483,7 @@ export function AnalysisJobStatusPage() {
   const [moduleArtifacts, setModuleArtifacts] = useState<ModuleArtifact[]>([]);
   const [networkArtifacts, setNetworkArtifacts] = useState<NetworkArtifact[]>([]);
   const [pluginResults, setPluginResults] = useState<PluginResult[]>([]);
+  const [processEvidenceByPid, setProcessEvidenceByPid] = useState<Record<number, ProcessEvidenceBundle>>({});
   const [processArtifacts, setProcessArtifacts] = useState<ProcessArtifact[]>([]);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
@@ -540,12 +590,14 @@ export function AnalysisJobStatusPage() {
 
       if (findingResult.status === "fulfilled") {
         setFindings(findingResult.value.items);
+        setFindingTotal(findingResult.value.total ?? findingResult.value.items.length);
       } else {
         setFindingError(findingResult.reason instanceof Error ? findingResult.reason.message : "RAMSight could not refresh risk findings.");
       }
 
       if (iocResult.status === "fulfilled") {
         setIocs(iocResult.value.items);
+        setIocTotal(iocResult.value.total ?? iocResult.value.items.length);
       } else {
         setIocError(iocResult.reason instanceof Error ? iocResult.reason.message : "RAMSight could not refresh IOC records.");
       }
@@ -569,11 +621,22 @@ export function AnalysisJobStatusPage() {
     Promise.resolve().then(() => {
       if (!active) return null;
       setFindingLoading(true);
-      return listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: 500 });
+      return Promise.all([
+        listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: 500 }),
+        listRiskFindings({ job_id: jobId, severity_effective: "high", limit: 1 }),
+        listRiskFindings({ job_id: jobId, severity_effective: "critical", limit: 1 }),
+      ]);
     })
-      .then((response) => {
-        if (!response) return;
-        if (active) setFindings(response.items);
+      .then((responses) => {
+        if (!responses) return;
+        const [findingResponse, highResponse, criticalResponse] = responses;
+        if (active) {
+          setFindings(findingResponse.items);
+          setFindingTotal(findingResponse.total ?? findingResponse.items.length);
+          setHighPriorityTotal(
+            (highResponse.total ?? highResponse.items.length) + (criticalResponse.total ?? criticalResponse.items.length),
+          );
+        }
       })
       .catch((err: unknown) => {
         if (active) setFindingError(err instanceof Error ? err.message : "RAMSight could not load risk findings.");
@@ -584,7 +647,10 @@ export function AnalysisJobStatusPage() {
 
     listIOCs({ job_id: jobId, limit: 500 })
       .then((response) => {
-        if (active) setIocs(response.items);
+        if (active) {
+          setIocs(response.items);
+          setIocTotal(response.total ?? response.items.length);
+        }
       })
       .catch((err: unknown) => {
         if (active) setIocError(err instanceof Error ? err.message : "RAMSight could not load IOC records.");
@@ -642,6 +708,48 @@ export function AnalysisJobStatusPage() {
     });
   }
   const processRiskSummaries = useMemo(() => sortedFindings.filter(isProcessRiskSummary), [sortedFindings]);
+
+  useEffect(() => {
+    if (!jobId || !job || isActiveJobStatus(job.status)) return;
+    const pids = [...new Set(processRiskSummaries.map(pidFromFinding).filter((pid): pid is number => pid !== null))].slice(0, 10);
+    if (pids.length === 0) {
+      setProcessEvidenceByPid({});
+      return;
+    }
+    let active = true;
+    Promise.allSettled(
+      pids.map(async (pid) => {
+        const [commandResult, memoryResult, moduleResult, networkResult, yaraResult] = await Promise.allSettled([
+          listCommandArtifacts(jobId, { pid, limit: 10 }),
+          listMemoryRegionArtifacts(jobId, { pid, limit: 20 }),
+          listModuleArtifacts(jobId, { pid, limit: 20 }),
+          listNetworkArtifacts(jobId, { pid, limit: 20 }),
+          listYaraMatches(jobId, { pid, limit: 50 }),
+        ]);
+        return {
+          pid,
+          evidence: {
+            commands: commandResult.status === "fulfilled" ? commandResult.value.items : [],
+            memoryRegions: memoryResult.status === "fulfilled" ? memoryResult.value.items : [],
+            modules: moduleResult.status === "fulfilled" ? moduleResult.value.items : [],
+            networks: networkResult.status === "fulfilled" ? networkResult.value.items : [],
+            yaraMatches: yaraResult.status === "fulfilled" ? yaraResult.value.items : [],
+          },
+        };
+      }),
+    ).then((results) => {
+      if (!active) return;
+      const next: Record<number, ProcessEvidenceBundle> = {};
+      for (const result of results) {
+        if (result.status === "fulfilled") next[result.value.pid] = result.value.evidence;
+      }
+      setProcessEvidenceByPid(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, [job?.status, jobId, processRiskSummaries]);
+
   const networkFindings = useMemo(() => sortedFindings.filter(isNetworkFinding), [sortedFindings]);
   const moduleFindings = useMemo(() => sortedFindings.filter(isModuleOrPathFinding), [sortedFindings]);
   const memoryFindings = useMemo(() => sortedFindings.filter(isMemoryRegionFinding), [sortedFindings]);
@@ -730,9 +838,9 @@ export function AnalysisJobStatusPage() {
       )}
 
       <div className="dashboard-grid">
-        <Card title="Findings"><p className="metric-value">{findings.length}</p><p className="muted">Triage findings recorded</p></Card>
-        <Card title="High priority"><p className="metric-value">{highPriorityFindings.length}</p><p className="muted">High or critical findings</p></Card>
-        <Card title="Indicators"><p className="metric-value">{iocs.length}</p><p className="muted">Extracted IOC records</p></Card>
+        <Card title="Findings"><p className="metric-value">{(findingTotal ?? findings.length).toLocaleString()}</p><p className="muted">{metricDetail(findingTotal, findings.length, "triage findings")}</p></Card>
+        <Card title="High priority"><p className="metric-value">{(highPriorityTotal ?? highPriorityFindings.length).toLocaleString()}</p><p className="muted">{metricDetail(highPriorityTotal, highPriorityFindings.length, "high/critical findings")}</p></Card>
+        <Card title="Indicators"><p className="metric-value">{(iocTotal ?? iocs.length).toLocaleString()}</p><p className="muted">{metricDetail(iocTotal, iocs.length, "IOC records")}</p></Card>
         <Card title="Plugin completion"><p className="metric-value metric-value-text">{pluginSummaryValue}</p><p className="muted">{pluginSummaryDetail}</p></Card>
         <Card title="Reports"><p className="metric-value">{reports.length}</p><p className="muted">{reportSummaryDetail}</p></Card>
       </div>
@@ -770,8 +878,11 @@ export function AnalysisJobStatusPage() {
       >
         <TopActionableDetections
           findings={processRiskSummaries}
+          commands={commandArtifacts}
           memoryRegions={memoryRegions}
+          modules={moduleArtifacts}
           networkArtifacts={networkArtifacts}
+          processEvidenceByPid={processEvidenceByPid}
           onFindingUpdated={handleFindingUpdated}
           yaraMatches={yaraMatches}
         />

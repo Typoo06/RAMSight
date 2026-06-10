@@ -95,23 +95,41 @@ class YaraMatchRead(OrmModel):
 
 class ProcessArtifactListResponse(BaseModel):
     items: list[ProcessArtifactRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
 
 
 class CommandArtifactListResponse(BaseModel):
     items: list[CommandArtifactRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
 
 
 class NetworkArtifactListResponse(BaseModel):
     items: list[NetworkArtifactRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
 
 
 class ModuleArtifactListResponse(BaseModel):
     items: list[ModuleArtifactRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
 
 
 class MemoryRegionArtifactListResponse(BaseModel):
     items: list[MemoryRegionArtifactRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
 
 
 class YaraMatchListResponse(BaseModel):
     items: list[YaraMatchRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None

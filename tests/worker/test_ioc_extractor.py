@@ -206,6 +206,36 @@ def test_correlated_malware_specific_yara_rule_is_threat_ioc() -> None:
     assert yara_ioc.extra_data["correlated"] is True
 
 
+def test_probable_malware_yara_only_finding_is_not_threat_ioc_without_correlation() -> None:
+    yara_id = uuid4()
+    artifacts = {
+        YARA_TABLE: [
+            {
+                "id": yara_id,
+                "rule_name": "Windows_Trojan_Generic_Loader",
+                "namespace": "elastic",
+                "tags": ["malware"],
+                "target_identifier": "PID 1780",
+                "offset": 4096,
+                "source_plugin": "windows.vadyarascan",
+                "extra_data": {"severity": "high", "malware_family": "generic_loader", "rule_category": "malware"},
+            }
+        ]
+    }
+    findings = [
+        {
+            **risk_finding(YARA_TABLE, yara_id, severity="high"),
+            "extra_data": {"detection_confidence": "probable_malware"},
+        }
+    ]
+
+    iocs = extract_iocs(artifacts, findings, context())
+
+    yara_ioc = iocs_by_type(iocs, IOC_YARA_RULE)[0]
+    assert yara_ioc.extra_data["ioc_role"] == "investigation_artifact"
+    assert yara_ioc.extra_data["correlated"] is False
+
+
 def test_generic_linux_yara_in_windows_scan_is_investigation_artifact() -> None:
     yara_id = uuid4()
     artifacts = {

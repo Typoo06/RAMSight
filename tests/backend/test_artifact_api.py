@@ -106,14 +106,22 @@ def test_process_artifacts_filter_by_job_pid_source_and_paginate(client_context)
         params={"pid": 340, "source_plugin": "windows.pslist"},
     )
     assert response.status_code == 200
-    items = response.json()["items"]
+    payload = response.json()
+    items = payload["items"]
     assert len(items) == 1
     assert items[0]["name"] == "svchost.exe"
     assert "raw_record" not in items[0]
+    assert payload["total"] == 1
+    assert payload["limit"] == 100
+    assert payload["offset"] == 0
 
     paged = client.get(f"/api/v1/analysis-jobs/{job_one_id}/artifacts/processes", params={"limit": 1, "offset": 1})
     assert paged.status_code == 200
-    assert len(paged.json()["items"]) == 1
+    paged_payload = paged.json()
+    assert len(paged_payload["items"]) == 1
+    assert paged_payload["total"] == 2
+    assert paged_payload["limit"] == 1
+    assert paged_payload["offset"] == 1
 
 
 def test_artifact_endpoints_validate_job_exists(client_context) -> None:

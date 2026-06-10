@@ -20,4 +20,6 @@ def list_iocs(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    return {"items": ioc_service.list_iocs(db, case_id=case_id, job_id=job_id, limit=limit, offset=offset)}
+    items = ioc_service.list_iocs(db, case_id=case_id, job_id=job_id, limit=limit, offset=offset)
+    total = ioc_service.count_iocs(db, case_id=case_id, job_id=job_id)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}

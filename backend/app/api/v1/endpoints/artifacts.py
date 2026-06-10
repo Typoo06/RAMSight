@@ -40,9 +40,10 @@ def list_process_artifacts(
 ):
     try:
         items = artifact_service.list_process_artifacts(db, job_id, pid, process_name, source_plugin, limit, offset)
+        total = artifact_service.count_process_artifacts(db, job_id, pid, process_name, source_plugin)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/analysis-jobs/{job_id}/artifacts/commands", response_model=CommandArtifactListResponse)
@@ -57,9 +58,10 @@ def list_command_artifacts(
 ):
     try:
         items = artifact_service.list_command_artifacts(db, job_id, pid, process_name, source_plugin, limit, offset)
+        total = artifact_service.count_command_artifacts(db, job_id, pid, process_name, source_plugin)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/analysis-jobs/{job_id}/artifacts/network", response_model=NetworkArtifactListResponse)
@@ -78,9 +80,12 @@ def list_network_artifacts(
         items = artifact_service.list_network_artifacts(
             db, job_id, pid, process_name, source_plugin, remote_address, protocol, limit, offset
         )
+        total = artifact_service.count_network_artifacts(
+            db, job_id, pid, process_name, source_plugin, remote_address, protocol
+        )
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/analysis-jobs/{job_id}/artifacts/modules", response_model=ModuleArtifactListResponse)
@@ -95,9 +100,10 @@ def list_module_artifacts(
 ):
     try:
         items = artifact_service.list_module_artifacts(db, job_id, pid, process_name, source_plugin, limit, offset)
+        total = artifact_service.count_module_artifacts(db, job_id, pid, process_name, source_plugin)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/analysis-jobs/{job_id}/artifacts/memory-regions", response_model=MemoryRegionArtifactListResponse)
@@ -116,9 +122,12 @@ def list_memory_region_artifacts(
         items = artifact_service.list_memory_region_artifacts(
             db, job_id, pid, process_name, source_plugin, executable_only, suspicious_only, limit, offset
         )
+        total = artifact_service.count_memory_region_artifacts(
+            db, job_id, pid, process_name, source_plugin, executable_only, suspicious_only
+        )
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/analysis-jobs/{job_id}/artifacts/yara-matches", response_model=YaraMatchListResponse)
@@ -136,6 +145,7 @@ def list_yara_matches(
         items = artifact_service.list_yara_matches(
             db, job_id, pid, source_plugin, rule_name, target_identifier, limit, offset
         )
+        total = artifact_service.count_yara_matches(db, job_id, pid, source_plugin, rule_name, target_identifier)
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return {"items": items}
+    return {"items": items, "total": total, "limit": limit, "offset": offset}

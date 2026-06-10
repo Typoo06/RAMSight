@@ -50,7 +50,18 @@ def list_risk_findings(
     limit: int = 100,
     offset: int = 0,
 ) -> list[RiskFinding]:
-    statement = select(RiskFinding).order_by(RiskFinding.score.desc(), RiskFinding.created_at.desc())
+    statement = risk_finding_statement(case_id, job_id, review_status, analyst_verdict, severity_effective)
+    return list(db.execute(statement.order_by(RiskFinding.score.desc(), RiskFinding.created_at.desc()).offset(offset).limit(limit)).scalars())
+
+
+def risk_finding_statement(
+    case_id: UUID | None = None,
+    job_id: UUID | None = None,
+    review_status: str | None = None,
+    analyst_verdict: str | None = None,
+    severity_effective: str | None = None,
+):
+    statement = select(RiskFinding)
     if case_id is not None:
         statement = statement.join(AnalysisJob, RiskFinding.analysis_job_id == AnalysisJob.id).where(
             AnalysisJob.case_id == case_id
@@ -68,7 +79,19 @@ def list_risk_findings(
             func.coalesce(RiskFinding.severity_override, RiskFinding.severity)
             == validate_choice(severity_effective, SEVERITIES, "severity_effective")
         )
-    return list(db.execute(statement.offset(offset).limit(limit)).scalars())
+    return statement
+
+
+def count_risk_findings(
+    db: Session,
+    case_id: UUID | None = None,
+    job_id: UUID | None = None,
+    review_status: str | None = None,
+    analyst_verdict: str | None = None,
+    severity_effective: str | None = None,
+) -> int:
+    statement = risk_finding_statement(case_id, job_id, review_status, analyst_verdict, severity_effective)
+    return int(db.execute(select(func.count()).select_from(statement.subquery())).scalar_one())
 
 
 def update_review(db: Session, finding_id: UUID, data: RiskFindingReviewUpdate) -> RiskFinding:

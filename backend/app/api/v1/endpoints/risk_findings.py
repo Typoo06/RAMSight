@@ -26,17 +26,29 @@ def list_risk_findings(
     db: Session = Depends(get_db),
 ):
     try:
+        items = risk_finding_service.list_risk_findings(
+            db,
+            case_id=case_id,
+            job_id=job_id,
+            review_status=review_status,
+            analyst_verdict=analyst_verdict,
+            severity_effective=severity_effective,
+            limit=limit,
+            offset=offset,
+        )
+        total = risk_finding_service.count_risk_findings(
+            db,
+            case_id=case_id,
+            job_id=job_id,
+            review_status=review_status,
+            analyst_verdict=analyst_verdict,
+            severity_effective=severity_effective,
+        )
         return {
-            "items": risk_finding_service.list_risk_findings(
-                db,
-                case_id=case_id,
-                job_id=job_id,
-                review_status=review_status,
-                analyst_verdict=analyst_verdict,
-                severity_effective=severity_effective,
-                limit=limit,
-                offset=offset,
-            )
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
         }
     except ValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -266,4 +266,7 @@ export interface YaraMatchArtifact {
 
 export interface ListResponse<T> {
   items: T[];
+  total?: number | null;
+  limit?: number | null;
+  offset?: number | null;
 }

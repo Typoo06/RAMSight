@@ -126,6 +126,21 @@ def test_external_public_ip_detection_and_private_ip_ignored() -> None:
     assert findings[0].extra_data["remote_address"] == "8.8.8.8"
 
 
+def test_network_only_browser_process_summary_is_not_high() -> None:
+    artifacts = {
+        NETWORK_TABLE: [
+            {"id": uuid4(), "pid": 4242, "remote_address": "8.8.8.8", "remote_port": 443, "process_name": "chrome.exe"},
+            {"id": uuid4(), "pid": 4242, "remote_address": "1.1.1.1", "remote_port": 443, "process_name": "chrome.exe"},
+        ]
+    }
+    findings = evaluate_rules([rule_by_id("EXTERNAL_NETWORK_CONNECTION")], artifacts, context())
+    summaries = build_process_risk_summaries(findings, load_risk_scoring_config(rules_dir()), artifacts)
+
+    assert len(summaries) == 1
+    assert summaries[0].severity == "medium"
+    assert summaries[0].extra_data["evidence_groups"] == ["network_endpoint"]
+
+
 def test_memory_region_finding_uses_cautious_wording() -> None:
     artifacts = {
         MEMORY_REGION_TABLE: [
@@ -382,6 +397,23 @@ def test_memory_region_network_correlation_by_pid() -> None:
     assert findings[0].extra_data["linked_artifacts"]["remote_address"] == "8.8.8.8"
 
 
+def test_vadinfo_context_does_not_trigger_memory_network_correlation() -> None:
+    artifacts = {
+        MEMORY_REGION_TABLE: [{**memory_region(), "source_plugin": "windows.vadinfo"}],
+        NETWORK_TABLE: [
+            {"id": uuid4(), "pid": 2924, "remote_address": "8.8.8.8", "remote_port": 443, "source_plugin": "windows.netscan"}
+        ],
+    }
+
+    findings = evaluate_rules(
+        [rule_by_id("MEMORY_PROCESS_INJECTION_CANDIDATE"), rule_by_id("MEMORY_REGION_WITH_NETWORK_ACTIVITY")],
+        artifacts,
+        context(),
+    )
+
+    assert findings == []
+
+
 def test_memory_region_suspicious_command_correlation_by_pid() -> None:
     command_id = uuid4()
     artifacts = {
@@ -491,7 +523,7 @@ def test_process_risk_summary_aggregates_memory_only_signals() -> None:
     assert len(summaries) == 1
     assert summaries[0].extra_data["pid"] == 2924
     assert summaries[0].extra_data["process_name"] == "WinRAR.exe"
-    assert summaries[0].extra_data["total_score"] == 21
+    assert summaries[0].extra_data["total_score"] == 26
     assert summaries[0].severity == "high"
     assert summaries[0].extra_data["unique_component_count"] == 2
     assert summaries[0].extra_data["memory_region_count"] == 1
@@ -750,6 +782,7 @@ def test_yara_only_memcompression_like_summary_is_suspicious_not_probable() -> N
     assert summaries[0].extra_data["process_name"] == "MemCompression"
     assert summaries[0].extra_data["evidence_groups"] == ["yara_match"]
     assert summaries[0].extra_data["detection_confidence"] == "suspicious"
+    assert summaries[0].severity == "medium"
 
 
 def test_yara_only_generic_third_party_matches_do_not_create_process_critical_summaries() -> None:
@@ -889,6 +922,11 @@ def test_known_microsoft_appdata_module_paths_skip_standalone_module_findings() 
             microsoft_appdata_module(
                 "C:\\Users\\analyst\\AppData\\Local\\Microsoft\\EdgeWebView\\Application\\WebView2Loader.dll",
                 process_name="msedgewebview2.exe",
+            ),
+            microsoft_appdata_module(
+                "C:\\Users\\analyst\\AppData\\Local\\Microsoft\\Windows\\Search\\EBWebView\\domain_actions.dll",
+                process_name="msedgewebview2.exe",
+                name="domain_actions.dll",
             ),
         ]
     }

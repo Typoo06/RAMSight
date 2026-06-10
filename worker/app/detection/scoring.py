@@ -122,6 +122,14 @@ def component_key(finding: FindingDraft) -> tuple:
 
 
 def evidence_groups_for_finding(finding: FindingDraft) -> set[str]:
+    if finding.rule_id == "MEMORY_REGION_WITH_NETWORK_ACTIVITY":
+        return {"memory_region", "network_endpoint"}
+    if finding.rule_id == "MEMORY_REGION_WITH_SUSPICIOUS_COMMAND":
+        return {"memory_region", "suspicious_command"}
+    if finding.rule_id == "MEMORY_REGION_WITH_SUSPICIOUS_MODULE":
+        if microsoft_module_reputation(finding):
+            return {"memory_region", "module_context"}
+        return {"memory_region", "suspicious_module"}
     if finding.rule_id in NETWORK_CORRELATION_RULE_IDS:
         return {"network_endpoint"}
     if finding.rule_id in COMMAND_CORRELATION_RULE_IDS:
@@ -229,7 +237,7 @@ def has_very_high_confidence_yara(components: list[FindingDraft]) -> bool:
 
 def has_correlated_yara_evidence(evidence_groups: set[str]) -> bool:
     return "yara_match" in evidence_groups and bool(
-        evidence_groups & {"memory_region", "network_endpoint", "suspicious_command", "suspicious_module"}
+        evidence_groups & {"memory_region", "network_endpoint", "suspicious_command", "suspicious_module", "module_context"}
     )
 
 
@@ -325,6 +333,16 @@ def build_process_risk_summaries(
             continue
         selected = deduped[:max_components]
         total_score, evidence_groups = score_by_independent_evidence_groups(selected)
+        if evidence_groups == {"yara_match"}:
+            total_score = min(total_score, 5)
+        elif evidence_groups == {"network_endpoint"}:
+            total_score = min(total_score, 5)
+        elif evidence_groups <= {"suspicious_module"}:
+            total_score = min(total_score, 5)
+        elif evidence_groups <= {"module_context"}:
+            total_score = min(total_score, 4)
+        elif evidence_groups <= {"suspicious_module", "module_context"}:
+            total_score = min(total_score, 5)
         severity = severity_for_score(total_score, scoring_config)
         has_memory = "memory_region" in evidence_groups
         has_yara = "yara_match" in evidence_groups
@@ -392,6 +410,8 @@ def build_process_risk_summaries(
             or very_high_yara
         ) else "suspicious"
         if has_benign_context_only(selected, evidence_groups):
+            confidence = "context_only"
+        elif evidence_groups <= {"module_context"}:
             confidence = "context_only"
         summaries.append(
             FindingDraft(

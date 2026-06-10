@@ -26,6 +26,8 @@ KNOWN_MICROSOFT_APPDATA_ROOTS = {
     "onedrive": "/appdata/local/microsoft/onedrive/",
     "edge": "/appdata/local/microsoft/edge/",
     "edgewebview": "/appdata/local/microsoft/edgewebview/",
+    "search": "/appdata/local/microsoft/windows/search/",
+    "ebwebview": "/appdata/local/microsoft/ebwebview/",
 }
 
 BENIGN_PROCESS_CONTEXTS = {
@@ -50,8 +52,17 @@ BENIGN_PROCESS_CONTEXTS = {
         "reason": "Microsoft OneDrive sync client context",
     },
     "edge_webview": {
-        "name_fragments": ("msedge", "msedgewebview", "webview2", "microsoftedge"),
-        "path_fragments": ("microsoft\\edge", "microsoft/edge", "edgewebview", "webview2"),
+        "name_fragments": ("msedge", "msedgewebview", "webview2", "microsoftedge", "searchhost", "searchapp"),
+        "path_fragments": (
+            "microsoft\\edge",
+            "microsoft/edge",
+            "edgewebview",
+            "webview2",
+            "ebwebview",
+            "microsoft\\windows\\search",
+            "microsoft/windows/search",
+            "domain_actions.dll",
+        ),
         "reason": "Microsoft Edge / WebView runtime context",
     },
     "defender": {

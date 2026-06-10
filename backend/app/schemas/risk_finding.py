@@ -40,6 +40,9 @@ class RiskFindingRead(OrmModel):
 
 class RiskFindingListResponse(BaseModel):
     items: list[RiskFindingRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
 
 
 class RiskFindingReviewUpdate(BaseModel):
