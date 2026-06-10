@@ -81,12 +81,30 @@
   </div>
 
   <h2>Plugin Results</h2>
+  {% if plugin_coverage_summary %}
+  <h3>Plugin Coverage Summary</h3>
+  <table class="compact">
+    <tr><th>Category</th><th>Selected</th><th>Completed</th><th>Failed</th><th>Skipped</th><th>Unavailable</th><th>Plugins</th></tr>
+    {% for row in plugin_coverage_summary %}
+    <tr>
+      <td>{{ row.category }}</td>
+      <td>{{ row.selected }}</td>
+      <td>{{ row.completed }}</td>
+      <td>{{ row.failed }}</td>
+      <td>{{ row.skipped }}</td>
+      <td>{{ row.unavailable }}</td>
+      <td>{% if row.plugins %}{{ row.plugins | join(", ") }}{% else %}N/A{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
   {% if plugin_status_rows %}
   <table class="compact">
-    <tr><th>Plugin</th><th>Status</th><th>Parsed records</th><th>Duration ms</th><th>Timeout</th><th>Error summary</th></tr>
+    <tr><th>Plugin</th><th>Category</th><th>Status</th><th>Parsed records</th><th>Duration ms</th><th>Timeout</th><th>Error summary</th></tr>
     {% for plugin in plugin_status_rows %}
     <tr>
-      <td>{{ plugin.plugin_name }}{% if plugin.is_yara_plugin %}<br><span class="muted">YARA plugin</span>{% endif %}</td>
+      <td>{{ plugin.plugin_name }}{% if plugin.is_yara_plugin %}<br><span class="muted">YARA plugin</span>{% endif %}{% if plugin.cli_plugin_name %}<br><span class="muted">{{ plugin.cli_plugin_name }}</span>{% endif %}</td>
+      <td>{{ plugin.category }}{% if plugin.parser_strategy %}<br><span class="muted">Parser: {{ plugin.parser_strategy }}</span>{% endif %}</td>
       <td>{{ plugin.status }}</td>
       <td>{{ plugin.parsed_record_count }}</td>
       <td>{{ plugin.duration_ms }}</td>

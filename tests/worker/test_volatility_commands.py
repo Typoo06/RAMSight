@@ -46,7 +46,7 @@ def test_build_command_omits_symbol_dirs_when_not_configured() -> None:
     )
 
     assert "-s" not in command
-    assert command[-1] == "windows.malfind.Malfind"
+    assert command[-1] == "windows.malware.malfind.Malfind"
 
 
 def test_build_yarascan_command_adds_yara_file_when_configured() -> None:

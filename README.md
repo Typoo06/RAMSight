@@ -37,6 +37,8 @@ python scripts/demo/preflight_check.py --api-base http://localhost:8000/api/v1 -
 
 For the memory-only malware defense demo, use the `windows_memory_yara_elastic` analysis profile when starting a Windows memory job. It runs the standard Volatility triage plugins plus process-memory YARA scanning with the validated Elastic third-party pack. The legacy `windows_memory_yara` profile remains a backward-compatible alias for Elastic YARA; it does not use the archived RAMSight demo rules. The faster `windows_default` profile is still available when YARA scan time is not acceptable.
 
+Optional advanced profiles are available for deeper Volatility coverage: `windows_memory_deep`, `windows_memory_deep_yara_elastic`, `windows_memory_deep_yara_neo23x0`, `windows_memory_deep_yara_third_party_all`, `windows_malware_evasion`, `windows_kernel_rootkit`, and `windows_investigation_context`. The `windows_memory_yara_third_party_all` profile is baseline triage plus Elastic + Neo23x0 YARA and is slow; `windows_memory_deep_yara_third_party_all` adds deep VAD/injection/thread/module plugins and is very slow, intended for advanced investigation only.
+
 Run a strict preflight against the known local demo job, if that job exists in your database:
 
 ```bash

@@ -24,6 +24,7 @@ import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { ErrorState } from "../components/ui/ErrorState";
 import { LoadingState } from "../components/ui/LoadingState";
+import { Table } from "../components/ui/Table";
 import type {
   AnalysisJob,
   CommandArtifact,
@@ -73,15 +74,25 @@ const YARA_PLUGIN_NAMES = new Set(["windows.vadyarascan", "yarascan", "linux.vma
 const PROFILE_LABELS: Record<string, string> = {
   windows_default: "Standard Windows triage",
   windows_memory_yara: "Elastic YARA (compatibility alias)",
-  windows_memory_yara_elastic: "Elastic YARA",
-  windows_memory_yara_neo23x0: "Neo23x0 Signature Base YARA",
+  windows_memory_yara_elastic: "Windows memory + Elastic YARA",
+  windows_memory_yara_neo23x0: "Windows memory + Neo23x0 YARA",
   windows_memory_yara_third_party_all: "Third-party YARA All (slow)",
+  windows_memory_deep: "Deep Windows memory triage",
+  windows_memory_deep_yara_elastic: "Deep memory + Elastic YARA",
+  windows_memory_deep_yara_neo23x0: "Deep memory + Neo23x0 YARA",
+  windows_memory_deep_yara_third_party_all: "Deep memory + Third-party YARA All (very slow)",
+  windows_malware_evasion: "Windows malware evasion scan",
+  windows_kernel_rootkit: "Windows kernel/rootkit scan",
+  windows_investigation_context: "Windows investigation context scan",
 };
 const YARA_PROFILE_NAMES = new Set([
   "windows_memory_yara",
   "windows_memory_yara_elastic",
   "windows_memory_yara_neo23x0",
   "windows_memory_yara_third_party_all",
+  "windows_memory_deep_yara_elastic",
+  "windows_memory_deep_yara_neo23x0",
+  "windows_memory_deep_yara_third_party_all",
 ]);
 
 function analysisProfileLabel(profile: string | null | undefined): string {
@@ -211,6 +222,58 @@ function networkEndpoint(network: NetworkArtifact): string {
 
 function iocRole(ioc: IOC): string {
   return textValue(asRecord(ioc.extra_data).ioc_role, "investigation_artifact");
+}
+
+interface PluginCoverageRow {
+  category: string;
+  selected: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  unavailable: number;
+  plugins: string[];
+}
+
+function buildPluginCoverage(pluginResults: PluginResult[]): PluginCoverageRow[] {
+  const grouped = new Map<string, PluginCoverageRow>();
+  for (const pluginResult of pluginResults) {
+    const extraData = asRecord(pluginResult.extra_data);
+    const category = textValue(extraData.plugin_category, "Core triage");
+    const bucket = grouped.get(category) ?? {
+      category,
+      selected: 0,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      unavailable: 0,
+      plugins: [],
+    };
+    const status = pluginResult.status.toLowerCase();
+    bucket.selected += 1;
+    if (status === "completed") bucket.completed += 1;
+    if (status === "failed") bucket.failed += 1;
+    if (status === "skipped") bucket.skipped += 1;
+    if (extraData.available === false || status === "unavailable") bucket.unavailable += 1;
+    bucket.plugins.push(pluginResult.plugin_name);
+    grouped.set(category, bucket);
+  }
+  const order = [
+    "Core triage",
+    "Memory/VAD",
+    "Injection/Hollowing",
+    "Thread analysis",
+    "YARA",
+    "Network",
+    "Module/DLL",
+    "Evasion/Hooking",
+    "Kernel/Rootkit",
+    "Persistence/Context",
+  ];
+  return [...grouped.values()].sort((left, right) => {
+    const leftIndex = order.indexOf(left.category);
+    const rightIndex = order.indexOf(right.category);
+    return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex) || left.category.localeCompare(right.category);
+  });
 }
 
 function TopActionableDetections({
@@ -605,6 +668,7 @@ export function AnalysisJobStatusPage() {
       ? "Completed plugins"
       : `${failedPluginCount} plugin issue${failedPluginCount === 1 ? "" : "s"} recorded`;
   const reportSummaryDetail = reports.length === 0 ? "No HTML report metadata yet" : "HTML report metadata available";
+  const pluginCoverage = useMemo(() => buildPluginCoverage(pluginResults), [pluginResults]);
   const relationshipInputWarning = findingError || iocError || drilldownSectionError
     ? "Some relationship inputs are unavailable. RAMSight is showing loaded metadata only."
     : null;
@@ -812,7 +876,31 @@ export function AnalysisJobStatusPage() {
         empty={pluginResults.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "No plugin result metadata is available for this job.")}
       >
-        <PluginResultTable pluginResults={pluginResults} />
+        <div className="page-stack compact-stack">
+          {pluginCoverage.length > 0 && (
+            <div className="table-block">
+              <Table caption="Plugin coverage by category">
+                <thead>
+                  <tr><th>Category</th><th>Selected</th><th>Completed</th><th>Failed</th><th>Skipped</th><th>Unavailable</th><th>Plugins</th></tr>
+                </thead>
+                <tbody>
+                  {pluginCoverage.map((row) => (
+                    <tr key={row.category}>
+                      <td>{row.category}</td>
+                      <td>{row.selected}</td>
+                      <td>{row.completed}</td>
+                      <td>{row.failed}</td>
+                      <td>{row.skipped}</td>
+                      <td>{row.unavailable}</td>
+                      <td className="long-text">{row.plugins.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          )}
+          <PluginResultTable pluginResults={pluginResults} />
+        </div>
       </ResultSection>
 
       <Card title="Artifact drill-down filter">

@@ -17,6 +17,7 @@ from app.detection.engine import (
 from app.detection.loader import load_detection_rules, load_risk_scoring_config
 from app.detection.rules import FindingDraft, applies_to_os
 from app.detection.scoring import build_process_risk_summaries
+from app.detection.persistence import plugin_context_findings
 
 
 def rules_dir() -> Path:
@@ -986,3 +987,34 @@ def test_unknown_user_writable_module_path_still_contributes_strong_context() ->
     assert len(summaries) == 1
     assert summaries[0].severity == "high"
     assert "suspicious_module" in summaries[0].extra_data["evidence_groups"]
+
+
+def test_deep_plugin_context_findings_are_cautious_context_only() -> None:
+    ctx = context()
+    plugin_id = uuid4()
+    findings = plugin_context_findings(
+        ctx,
+        [
+            {
+                "id": plugin_id,
+                "plugin_name": "windows.etwpatch",
+                "source_plugin": "windows.etwpatch",
+                "status": "completed",
+                "parsed_record_count": 3,
+                "extra_data": {
+                    "plugin_category": "Evasion/Hooking",
+                    "cli_plugin_name": "windows.etwpatch.EtwPatch",
+                    "parser_strategy": "none",
+                    "product_purpose": "Detect ETW patching evasion indicators.",
+                },
+            }
+        ],
+    )
+
+    assert len(findings) == 1
+    assert findings[0].severity == "medium"
+    assert findings[0].score == 5
+    assert findings[0].artifact_type == "plugin_results"
+    assert findings[0].artifact_id == str(plugin_id)
+    assert findings[0].extra_data["detection_confidence"] == "context_only"
+    assert "confirmed malware" in findings[0].recommendation

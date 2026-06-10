@@ -27,6 +27,9 @@ YARA_PROFILE_NAMES = {
     "windows_memory_yara_elastic",
     "windows_memory_yara_neo23x0",
     "windows_memory_yara_third_party_all",
+    "windows_memory_deep_yara_elastic",
+    "windows_memory_deep_yara_neo23x0",
+    "windows_memory_deep_yara_third_party_all",
 }
 PATH_LIKE_RE = re.compile(r"((?:/[^\s:;'\"]+){2,}|[A-Za-z]:\\[^\s:;'\"]+)")
 PID_RE = re.compile(r"\b(?:pid\s*)?(\d+)\b", re.IGNORECASE)
@@ -536,6 +539,7 @@ def build_yara_status(analysis_job: dict, plugin_results: list[dict], yara_match
 def build_plugin_status_rows(plugin_results: list[dict]) -> list[dict]:
     rows = []
     for plugin in plugin_results:
+        extra_data = _extra_data(plugin)
         timeout = _timeout_seconds(plugin)
         timeout_status = "N/A"
         if _is_timeout(plugin):
@@ -543,6 +547,10 @@ def build_plugin_status_rows(plugin_results: list[dict]) -> list[dict]:
         rows.append(
             {
                 "plugin_name": _text(_plugin_name(plugin)),
+                "category": _text(extra_data.get("plugin_category"), "Core triage"),
+                "cli_plugin_name": _text(extra_data.get("cli_plugin_name"), ""),
+                "parser_strategy": _text(extra_data.get("parser_strategy"), "none"),
+                "product_purpose": _text(extra_data.get("product_purpose"), ""),
                 "status": _text(plugin.get("status")),
                 "parsed_record_count": _text(plugin.get("parsed_record_count")),
                 "duration_ms": _text(plugin.get("duration_ms")),
@@ -556,6 +564,43 @@ def build_plugin_status_rows(plugin_results: list[dict]) -> list[dict]:
             }
         )
     return rows
+
+
+def build_plugin_coverage_summary(plugin_results: list[dict]) -> list[dict]:
+    grouped: dict[str, dict] = {}
+    for plugin in plugin_results:
+        extra = _extra_data(plugin)
+        category = _text(extra.get("plugin_category"), "Core triage")
+        status = str(plugin.get("status") or "unknown").lower()
+        available = extra.get("available")
+        bucket = grouped.setdefault(
+            category,
+            {"category": category, "selected": 0, "completed": 0, "failed": 0, "skipped": 0, "unavailable": 0, "plugins": []},
+        )
+        bucket["selected"] += 1
+        if status == "completed":
+            bucket["completed"] += 1
+        elif status == "failed":
+            bucket["failed"] += 1
+        elif status == "skipped":
+            bucket["skipped"] += 1
+        if available is False or status == "unavailable":
+            bucket["unavailable"] += 1
+        bucket["plugins"].append(_text(_plugin_name(plugin)))
+    category_order = [
+        "Core triage",
+        "Memory/VAD",
+        "Injection/Hollowing",
+        "Thread analysis",
+        "YARA",
+        "Network",
+        "Module/DLL",
+        "Evasion/Hooking",
+        "Kernel/Rootkit",
+        "Persistence/Context",
+    ]
+    order = {category: index for index, category in enumerate(category_order)}
+    return sorted(grouped.values(), key=lambda item: (order.get(item["category"], 999), item["category"]))
 
 
 def _finding_pid_process(finding: dict) -> tuple[object | None, str | None]:
@@ -1013,6 +1058,7 @@ def build_report_context(
         "analysis_job": row_dict(analysis_job),
         "plugin_results": plugin_results_limited,
         "plugin_status_rows": build_plugin_status_rows(plugin_results_limited),
+        "plugin_coverage_summary": build_plugin_coverage_summary(plugin_results_limited),
         "risk_findings": risk_findings,
         "top_findings": top_findings(risk_findings),
         "display_top_findings": display_top,

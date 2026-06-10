@@ -139,6 +139,10 @@ def test_runner_uses_discovered_yara_rules_for_vadyarascan(tmp_path) -> None:
     assert result.extra_data["yara_rules_configured"] is True
     assert result.extra_data["yara_rule_pack"] == "elastic_yara"
     assert result.extra_data["yara_rules_source"] == "elastic_yara.yar"
+    assert result.extra_data["logical_plugin_name"] == "windows.vadyarascan"
+    assert result.extra_data["cli_plugin_name"] == "windows.vadyarascan.VadYaraScan"
+    assert result.extra_data["plugin_category"] == "YARA"
+    assert result.extra_data["parser_strategy"] == "yara_matches"
 
 
 def test_runner_marks_timeout_failed(tmp_path) -> None:

@@ -177,12 +177,22 @@ def run_volatility_plugin(
     plugin_extra_data = {
         "requires_yara_rules": plugin.requires_yara_rules,
         "plugin_name": plugin.name,
+        "logical_plugin_name": plugin.name,
+        "cli_plugin_name": plugin.command_name,
+        "plugin_category": plugin.category,
+        "timeout_policy": plugin.timeout_policy,
+        "parser_strategy": plugin.parser_strategy,
+        "available": plugin.available,
+        "product_purpose": plugin.product_purpose,
         "is_yara_plugin": is_yara_plugin(plugin.name),
         "plugin_profile": plugin_profile,
         "timeout_seconds": timeout_seconds,
         "stderr_capture_limit_bytes": MAX_STDERR_CAPTURE_BYTES,
     }
 
+    if not plugin.available:
+        plugin_extra_data["skip_reason"] = "plugin is not available in the installed Volatility build"
+        return skipped_plugin_result(raw_dir, plugin, plugin_extra_data["skip_reason"], plugin_extra_data)
     if not plugin.implemented:
         return skipped_plugin_result(raw_dir, plugin, "plugin is registered but not implemented for execution yet", plugin_extra_data)
     yara_rules_path = None

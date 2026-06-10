@@ -50,7 +50,11 @@ def test_profile_pack_mapping_uses_third_party_packs_only(tmp_path) -> None:
     assert resolve_yara_rules_path(settings, plugin_profile="windows_memory_yara_elastic") == tmp_path / "yara" / "compiled" / "elastic_yara.yar"
     assert resolve_yara_rules_path(settings, plugin_profile="windows_memory_yara_neo23x0") == tmp_path / "yara" / "compiled" / "neo23x0_yara.yar"
     assert resolve_yara_rules_path(settings, plugin_profile="windows_memory_yara_third_party_all") == tmp_path / "yara" / "compiled" / "third_party_yara_all.yar"
+    assert resolve_yara_rules_path(settings, plugin_profile="windows_memory_deep_yara_elastic") == tmp_path / "yara" / "compiled" / "elastic_yara.yar"
+    assert resolve_yara_rules_path(settings, plugin_profile="windows_memory_deep_yara_neo23x0") == tmp_path / "yara" / "compiled" / "neo23x0_yara.yar"
+    assert resolve_yara_rules_path(settings, plugin_profile="windows_memory_deep_yara_third_party_all") == tmp_path / "yara" / "compiled" / "third_party_yara_all.yar"
     assert profile_is_heavy_yara("windows_memory_yara_third_party_all") is True
+    assert profile_is_heavy_yara("windows_memory_deep_yara_third_party_all") is True
 
 
 def test_disabled_or_archived_configured_yara_path_is_rejected(tmp_path) -> None:

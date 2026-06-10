@@ -23,12 +23,12 @@ const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; valu
   },
   {
     value: "windows_memory_yara_elastic",
-    label: "Elastic YARA",
+    label: "Windows memory + Elastic YARA",
     description: "Recommended demo path: standard Windows triage plus Elastic third-party YARA process-memory scanning.",
   },
   {
     value: "windows_memory_yara_neo23x0",
-    label: "Neo23x0 Signature Base YARA",
+    label: "Windows memory + Neo23x0 YARA",
     description: "Runs standard Windows triage plus Neo23x0 Signature Base process-memory YARA rules.",
   },
   {
@@ -36,14 +36,56 @@ const ANALYSIS_PROFILE_OPTIONS: Array<{ description: string; label: string; valu
     label: "Third-party YARA All (slow)",
     description: "Runs Elastic and Neo23x0 YARA packs together. Use explicitly; this can be slow and memory intensive on large dumps.",
   },
+  {
+    value: "windows_memory_deep",
+    label: "Deep Windows memory triage",
+    description: "Runs deeper VAD, injection, hollowing, module, and thread-oriented Volatility plugins without YARA.",
+  },
+  {
+    value: "windows_memory_deep_yara_elastic",
+    label: "Deep memory + Elastic YARA",
+    description: "Deep Windows memory triage plus Elastic YARA. Slower than the standard Elastic profile.",
+  },
+  {
+    value: "windows_memory_deep_yara_neo23x0",
+    label: "Deep memory + Neo23x0 YARA",
+    description: "Deep Windows memory triage plus Neo23x0 Signature Base YARA. Use for deeper investigation.",
+  },
+  {
+    value: "windows_memory_deep_yara_third_party_all",
+    label: "Deep memory + Third-party YARA All (very slow)",
+    description: "Deep Volatility coverage plus Elastic and Neo23x0 YARA packs. Advanced investigation only; very slow on large dumps.",
+  },
+  {
+    value: "windows_malware_evasion",
+    label: "Windows malware evasion scan",
+    description: "Runs syscall, ETW, callback, SSDT, and hooking/evasion-oriented Volatility plugins.",
+  },
+  {
+    value: "windows_kernel_rootkit",
+    label: "Windows kernel/rootkit scan",
+    description: "Runs kernel module, driver, callback, thread, timer, and rootkit-context Volatility plugins.",
+  },
+  {
+    value: "windows_investigation_context",
+    label: "Windows investigation context scan",
+    description: "Runs services, scheduled tasks, SID, privilege, session, mutex, shimcache, AmCache, and command-history context plugins.",
+  },
 ];
 
 const PROFILE_LABELS: Record<string, string> = {
   windows_default: "Standard Windows triage",
   windows_memory_yara: "Elastic YARA (compatibility alias)",
-  windows_memory_yara_elastic: "Elastic YARA",
-  windows_memory_yara_neo23x0: "Neo23x0 Signature Base YARA",
+  windows_memory_yara_elastic: "Windows memory + Elastic YARA",
+  windows_memory_yara_neo23x0: "Windows memory + Neo23x0 YARA",
   windows_memory_yara_third_party_all: "Third-party YARA All (slow)",
+  windows_memory_deep: "Deep Windows memory triage",
+  windows_memory_deep_yara_elastic: "Deep memory + Elastic YARA",
+  windows_memory_deep_yara_neo23x0: "Deep memory + Neo23x0 YARA",
+  windows_memory_deep_yara_third_party_all: "Deep memory + Third-party YARA All (very slow)",
+  windows_malware_evasion: "Windows malware evasion scan",
+  windows_kernel_rootkit: "Windows kernel/rootkit scan",
+  windows_investigation_context: "Windows investigation context scan",
 };
 
 function evidenceOsFamily(evidence: Evidence): string {

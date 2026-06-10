@@ -243,6 +243,39 @@ def test_report_context_groups_yara_rules_and_counts() -> None:
     assert context["yara_summary"][0]["sample_offsets"] == ["0x10", "0x20"]
 
 
+def test_report_context_builds_plugin_coverage_summary() -> None:
+    case, evidence, job = base_rows()
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[
+            {"plugin_name": "windows.pslist", "status": "completed", "extra_data": {"plugin_category": "Core triage"}},
+            {"plugin_name": "windows.vadinfo", "status": "completed", "extra_data": {"plugin_category": "Memory/VAD"}},
+            {
+                "plugin_name": "windows.vadyarascan",
+                "status": "skipped",
+                "extra_data": {"plugin_category": "YARA", "is_yara_plugin": True, "available": True},
+            },
+            {
+                "plugin_name": "windows.future",
+                "status": "skipped",
+                "extra_data": {"plugin_category": "Evasion/Hooking", "available": False},
+            },
+        ],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=[],
+        iocs=[],
+        generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    coverage = {row["category"]: row for row in context["plugin_coverage_summary"]}
+    assert coverage["Core triage"]["completed"] == 1
+    assert coverage["Memory/VAD"]["selected"] == 1
+    assert coverage["YARA"]["skipped"] == 1
+    assert coverage["Evasion/Hooking"]["unavailable"] == 1
+
+
 def test_report_context_separates_threat_iocs_from_investigation_artifacts() -> None:
     case, evidence, job = base_rows()
     context = build_report_context(

@@ -11,8 +11,14 @@ PROFILE_YARA_PACKS = {
     "windows_memory_yara_elastic": "elastic_yara",
     "windows_memory_yara_neo23x0": "neo23x0_yara",
     "windows_memory_yara_third_party_all": "third_party_yara_all",
+    "windows_memory_deep_yara_elastic": "elastic_yara",
+    "windows_memory_deep_yara_neo23x0": "neo23x0_yara",
+    "windows_memory_deep_yara_third_party_all": "third_party_yara_all",
 }
-HEAVY_YARA_PROFILES = {"windows_memory_yara_third_party_all"}
+HEAVY_YARA_PROFILES = {
+    "windows_memory_yara_third_party_all",
+    "windows_memory_deep_yara_third_party_all",
+}
 
 
 def list_yara_rule_files(rules_dir: str | Path) -> list[Path]:

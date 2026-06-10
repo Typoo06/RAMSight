@@ -13,7 +13,7 @@ WINDOWS_CLI_PLUGIN_NAMES = {
     "windows.netscan": "windows.netscan.NetScan",
     "windows.dlllist": "windows.dlllist.DllList",
     "windows.handles": "windows.handles.Handles",
-    "windows.malfind": "windows.malfind.Malfind",
+    "windows.malfind": "windows.malware.malfind.Malfind",
     "windows.vadyarascan": "windows.vadyarascan.VadYaraScan",
 }
 
@@ -78,6 +78,48 @@ def test_third_party_yara_profiles_include_vadyarascan() -> None:
 
         assert "windows.vadyarascan" in plugin_names
         assert "windows.pslist" in plugin_names
+
+
+def test_deep_windows_profiles_add_memory_malware_plugins() -> None:
+    plugin_names = [plugin.name for plugin in select_plugins("windows", plugin_profile="windows_memory_deep", requested_plugins=None)]
+
+    assert "windows.vadinfo" in plugin_names
+    assert "windows.hollowprocesses" in plugin_names
+    assert "windows.processghosting" in plugin_names
+    assert "windows.vadyarascan" not in plugin_names
+
+
+def test_deep_third_party_yara_profile_is_deep_and_yara_enabled() -> None:
+    plugin_names = [
+        plugin.name
+        for plugin in select_plugins("windows", plugin_profile="windows_memory_deep_yara_third_party_all", requested_plugins=None)
+    ]
+
+    assert "windows.vadinfo" in plugin_names
+    assert "windows.suspicious_threads" in plugin_names
+    assert "windows.vadyarascan" in plugin_names
+
+
+def test_specialized_windows_profiles_cover_evasion_kernel_and_context() -> None:
+    evasion = [plugin.name for plugin in select_plugins("windows", plugin_profile="windows_malware_evasion", requested_plugins=None)]
+    kernel = [plugin.name for plugin in select_plugins("windows", plugin_profile="windows_kernel_rootkit", requested_plugins=None)]
+    context_plugins = [plugin.name for plugin in select_plugins("windows", plugin_profile="windows_investigation_context", requested_plugins=None)]
+
+    assert "windows.etwpatch" in evasion
+    assert "windows.unhooked_system_calls" in evasion
+    assert "windows.drivermodule" in kernel
+    assert "windows.timers" in kernel
+    assert "windows.svcscan" in context_plugins
+    assert "windows.scheduled_tasks" in context_plugins
+
+
+def test_plugin_metadata_describes_product_coverage() -> None:
+    plugin = get_plugin_definition("windows.etwpatch")
+
+    assert plugin.category == "Evasion/Hooking"
+    assert plugin.parser_strategy == "none"
+    assert plugin.available is True
+    assert "ETW" in plugin.product_purpose
 
 
 def test_unknown_os_without_requested_plugins_fails_cleanly() -> None:

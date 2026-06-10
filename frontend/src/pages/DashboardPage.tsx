@@ -58,9 +58,16 @@ function listNote<T>(label: string, list: LoadedList<T>): string {
 function profileLabel(profile: string | null | undefined): string {
   if (profile === "windows_default") return "Standard Windows triage";
   if (profile === "windows_memory_yara") return "Elastic YARA (compatibility alias)";
-  if (profile === "windows_memory_yara_elastic") return "Elastic YARA";
-  if (profile === "windows_memory_yara_neo23x0") return "Neo23x0 Signature Base YARA";
+  if (profile === "windows_memory_yara_elastic") return "Windows memory + Elastic YARA";
+  if (profile === "windows_memory_yara_neo23x0") return "Windows memory + Neo23x0 YARA";
   if (profile === "windows_memory_yara_third_party_all") return "Third-party YARA All (slow)";
+  if (profile === "windows_memory_deep") return "Deep Windows memory triage";
+  if (profile === "windows_memory_deep_yara_elastic") return "Deep memory + Elastic YARA";
+  if (profile === "windows_memory_deep_yara_neo23x0") return "Deep memory + Neo23x0 YARA";
+  if (profile === "windows_memory_deep_yara_third_party_all") return "Deep memory + Third-party YARA All (very slow)";
+  if (profile === "windows_malware_evasion") return "Windows malware evasion scan";
+  if (profile === "windows_kernel_rootkit") return "Windows kernel/rootkit scan";
+  if (profile === "windows_investigation_context") return "Windows investigation context scan";
   return displayValue(profile);
 }
 

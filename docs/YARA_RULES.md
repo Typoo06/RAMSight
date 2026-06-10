@@ -8,7 +8,10 @@ RAMSight uses YARA as a defensive memory-triage aid. Active runtime YARA profile
 - `windows_memory_yara`: backward-compatible alias for the Elastic third-party YARA pack.
 - `windows_memory_yara_elastic`: recommended demo profile using the compiled Elastic YARA pack.
 - `windows_memory_yara_neo23x0`: optional profile using the compiled Neo23x0 Signature Base YARA pack.
-- `windows_memory_yara_third_party_all`: optional heavy profile using Elastic and Neo23x0 together. Expect slower scans and higher memory use on large dumps.
+- `windows_memory_yara_third_party_all`: baseline Windows triage plus Elastic and Neo23x0 together. Expect slower scans and higher memory use on large dumps.
+- `windows_memory_deep_yara_elastic`: deep VAD/injection/thread/module Volatility coverage plus Elastic YARA.
+- `windows_memory_deep_yara_neo23x0`: deep VAD/injection/thread/module Volatility coverage plus Neo23x0 YARA.
+- `windows_memory_deep_yara_third_party_all`: deep Volatility coverage plus Elastic and Neo23x0 together. This is very slow and intended for advanced investigation only.
 
 The active pack files are generated into:
 

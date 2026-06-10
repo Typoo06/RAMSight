@@ -19,6 +19,7 @@ export function PluginResultTable({ pluginResults, limit = 100 }: PluginResultTa
         <thead>
           <tr>
             <th>Plugin</th>
+            <th>Category</th>
             <th>Status</th>
             <th>Duration</th>
             <th>Parsed rows</th>
@@ -33,6 +34,12 @@ export function PluginResultTable({ pluginResults, limit = 100 }: PluginResultTa
               <td className="long-text">
                 <strong className="table-cell-title">{pluginResult.plugin_name}</strong>
                 {pluginResult.source_plugin !== pluginResult.plugin_name && <span className="table-subtext">{pluginResult.source_plugin}</span>}
+                {typeof pluginResult.extra_data?.cli_plugin_name === "string" && <span className="table-subtext">{pluginResult.extra_data.cli_plugin_name}</span>}
+              </td>
+              <td className="long-text">
+                {displayValue(typeof pluginResult.extra_data?.plugin_category === "string" ? pluginResult.extra_data.plugin_category : null)}
+                {typeof pluginResult.extra_data?.parser_strategy === "string" && <span className="table-subtext">Parser: {pluginResult.extra_data.parser_strategy}</span>}
+                {typeof pluginResult.extra_data?.product_purpose === "string" && <span className="table-subtext">{pluginResult.extra_data.product_purpose}</span>}
               </td>
               <td><Badge tone={statusTone(pluginResult.status)}>{pluginResult.status}</Badge></td>
               <td>{formatDurationMs(pluginResult.duration_ms)}</td>
