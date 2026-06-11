@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     )
     evidence_upload_chunk_size_bytes: int = Field(default=16777216, alias="EVIDENCE_UPLOAD_CHUNK_SIZE_BYTES")
     evidence_upload_session_ttl_seconds: int = Field(default=86400, alias="EVIDENCE_UPLOAD_SESSION_TTL_SECONDS")
+    serpapi_key: str | None = Field(default=None, alias="SERPAPI_KEY")
+    chatbot_enable_web_enrichment: bool = Field(default=False, alias="CHATBOT_ENABLE_WEB_ENRICHMENT")
+    serpapi_engine: str = Field(default="google_ai_mode", alias="SERPAPI_ENGINE")
+    chatbot_mode: str = Field(default="standard", alias="CHATBOT_MODE")
+    llm_provider: str = Field(default="deepseek", alias="LLM_PROVIDER")
+    deepseek_api_key: str | None = Field(default=None, alias="DEEPSEEK_API_KEY")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL")
+    deepseek_model: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
+    llm_timeout_ms: int = Field(default=20000, alias="LLM_TIMEOUT_MS")
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
