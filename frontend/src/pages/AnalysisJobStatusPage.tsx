@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { getAnalysisJob, getAnalysisJobStatus } from "../api/analysisJobs";
 import {
   listCommandArtifacts,
@@ -463,6 +463,7 @@ function collectPidOptions(
 
 export function AnalysisJobStatusPage() {
   const { caseId, jobId } = useParams();
+  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [commandArtifacts, setCommandArtifacts] = useState<CommandArtifact[]>([]);
   const [drilldownError, setDrilldownError] = useState<string | null>(null);
@@ -708,15 +709,20 @@ export function AnalysisJobStatusPage() {
     });
   }
   const processRiskSummaries = useMemo(() => sortedFindings.filter(isProcessRiskSummary), [sortedFindings]);
+  const jobStatus = job?.status;
 
   useEffect(() => {
-    if (!jobId || !job || isActiveJobStatus(job.status)) return;
+    if (!jobId || !jobStatus || isActiveJobStatus(jobStatus)) return;
+    let active = true;
     const pids = [...new Set(processRiskSummaries.map(pidFromFinding).filter((pid): pid is number => pid !== null))].slice(0, 10);
     if (pids.length === 0) {
-      setProcessEvidenceByPid({});
-      return;
+      Promise.resolve().then(() => {
+        if (active) setProcessEvidenceByPid({});
+      });
+      return () => {
+        active = false;
+      };
     }
-    let active = true;
     Promise.allSettled(
       pids.map(async (pid) => {
         const [commandResult, memoryResult, moduleResult, networkResult, yaraResult] = await Promise.allSettled([
@@ -748,7 +754,7 @@ export function AnalysisJobStatusPage() {
     return () => {
       active = false;
     };
-  }, [job?.status, jobId, processRiskSummaries]);
+  }, [jobId, jobStatus, processRiskSummaries]);
 
   const networkFindings = useMemo(() => sortedFindings.filter(isNetworkFinding), [sortedFindings]);
   const moduleFindings = useMemo(() => sortedFindings.filter(isModuleOrPathFinding), [sortedFindings]);
@@ -787,6 +793,13 @@ export function AnalysisJobStatusPage() {
     </div>
   ) : null;
 
+  function handleSummarizeWithChatbot() {
+    if (!jobId) return;
+    const prompt = `Summarize report for job ${jobId}`;
+    const query = new URLSearchParams({ job_id: jobId, prompt });
+    navigate(`/chatbot?${query.toString()}`);
+  }
+
   if (!caseId || !jobId) return <ErrorState message="RAMSight could not identify the requested analysis job." />;
   if (loading) return <LoadingState label="Loading RAMSight analysis job..." />;
   if (error && !job) return <ErrorState message={error} />;
@@ -815,6 +828,11 @@ export function AnalysisJobStatusPage() {
             <div><dt>Started</dt><dd>{formatDateTime(job.started_at)}</dd></div>
             <div><dt>Completed</dt><dd>{formatDateTime(job.completed_at)}</dd></div>
           </dl>
+          <div className="job-chatbot-actions">
+            <button className="button button-secondary" type="button" onClick={handleSummarizeWithChatbot}>
+              Summarize with AI assistant
+            </button>
+          </div>
           {job.error_message && <p className="error-text">{job.error_message}</p>}
         </Card>
 

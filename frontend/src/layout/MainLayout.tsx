@@ -21,6 +21,7 @@ export function MainLayout({ children }: MainLayoutProps) {
             Dashboard
           </NavLink>
           <NavLink to="/cases">Cases</NavLink>
+          <NavLink to="/chatbot">AI assistant</NavLink>
         </nav>
       </aside>
       <div className="main-column">
