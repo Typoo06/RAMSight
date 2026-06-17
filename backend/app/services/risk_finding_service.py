@@ -47,10 +47,12 @@ def list_risk_findings(
     review_status: str | None = None,
     analyst_verdict: str | None = None,
     severity_effective: str | None = None,
+    category: str | None = None,
+    source_plugin: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[RiskFinding]:
-    statement = risk_finding_statement(case_id, job_id, review_status, analyst_verdict, severity_effective)
+    statement = risk_finding_statement(case_id, job_id, review_status, analyst_verdict, severity_effective, category, source_plugin)
     return list(db.execute(statement.order_by(RiskFinding.score.desc(), RiskFinding.created_at.desc()).offset(offset).limit(limit)).scalars())
 
 
@@ -60,6 +62,8 @@ def risk_finding_statement(
     review_status: str | None = None,
     analyst_verdict: str | None = None,
     severity_effective: str | None = None,
+    category: str | None = None,
+    source_plugin: str | None = None,
 ):
     statement = select(RiskFinding)
     if case_id is not None:
@@ -79,6 +83,14 @@ def risk_finding_statement(
             func.coalesce(RiskFinding.severity_override, RiskFinding.severity)
             == validate_choice(severity_effective, SEVERITIES, "severity_effective")
         )
+    if category is not None:
+        cleaned_category = clean_optional_text(category)
+        if cleaned_category is not None:
+            statement = statement.where(RiskFinding.category == cleaned_category)
+    if source_plugin is not None:
+        cleaned_source_plugin = clean_optional_text(source_plugin)
+        if cleaned_source_plugin is not None:
+            statement = statement.where(RiskFinding.source_plugin == cleaned_source_plugin)
     return statement
 
 
@@ -89,9 +101,27 @@ def count_risk_findings(
     review_status: str | None = None,
     analyst_verdict: str | None = None,
     severity_effective: str | None = None,
+    category: str | None = None,
+    source_plugin: str | None = None,
 ) -> int:
-    statement = risk_finding_statement(case_id, job_id, review_status, analyst_verdict, severity_effective)
+    statement = risk_finding_statement(case_id, job_id, review_status, analyst_verdict, severity_effective, category, source_plugin)
     return int(db.execute(select(func.count()).select_from(statement.subquery())).scalar_one())
+
+
+def export_risk_findings(
+    db: Session,
+    case_id: UUID | None = None,
+    job_id: UUID | None = None,
+    review_status: str | None = None,
+    analyst_verdict: str | None = None,
+    severity_effective: str | None = None,
+    category: str | None = None,
+    source_plugin: str | None = None,
+) -> list[RiskFinding]:
+    statement = risk_finding_statement(
+        case_id, job_id, review_status, analyst_verdict, severity_effective, category, source_plugin
+    )
+    return list(db.execute(statement.order_by(RiskFinding.score.desc(), RiskFinding.created_at.desc())).scalars())
 
 
 def update_review(db: Session, finding_id: UUID, data: RiskFindingReviewUpdate) -> RiskFinding:

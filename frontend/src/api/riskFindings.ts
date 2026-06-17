@@ -1,4 +1,4 @@
-import { apiRequest, jsonBody } from "./client";
+import { apiDownloadUrl, apiRequest, jsonBody } from "./client";
 import type { AnalystNote, ListResponse, RiskFinding } from "../types/domain";
 
 export interface RiskFindingListParams {
@@ -35,6 +35,18 @@ export function listRiskFindings(params: RiskFindingListParams = {}): Promise<Li
   query.set("limit", String(params.limit ?? 500));
   query.set("offset", String(params.offset ?? 0));
   return apiRequest<ListResponse<RiskFinding>>(`/api/v1/risk-findings?${query.toString()}`);
+}
+
+export type RiskFindingExportFormat = "json" | "csv";
+
+export function riskFindingExportDownloadUrl(params: RiskFindingListParams = {}, format: RiskFindingExportFormat = "json"): string {
+  const query = new URLSearchParams();
+  if (params.case_id) query.set("case_id", params.case_id);
+  if (params.job_id) query.set("job_id", params.job_id);
+  if (params.review_status) query.set("review_status", params.review_status);
+  if (params.analyst_verdict) query.set("analyst_verdict", params.analyst_verdict);
+  if (params.severity_effective) query.set("severity_effective", params.severity_effective);
+  return apiDownloadUrl(`/api/v1/risk-findings/export.${format}?${query.toString()}`);
 }
 
 export function updateRiskFindingReview(findingId: string, payload: RiskFindingReviewPayload): Promise<RiskFinding> {

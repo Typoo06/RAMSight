@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.models import AnalysisJob, Report
+from app.models import AnalysisJob, PluginResult, Report
 from app.storage.keys import ioc_export_key, report_object_key
 from app.storage.validation import normalize_safe_filename
 from app.services.errors import NotFoundError, ValidationError
@@ -72,4 +72,20 @@ def ioc_export_download_spec(job: AnalysisJob, export_format: str, settings: Set
         filename=filename,
         media_type=media_type,
         missing_message="IOC export is not available for this analysis job.",
+    )
+
+
+def plugin_raw_output_download_spec(plugin_result: PluginResult, settings: Settings) -> DownloadSpec:
+    if not plugin_result.raw_output_bucket or not plugin_result.raw_output_key:
+        raise NotFoundError("raw plugin output is not available")
+    if plugin_result.raw_output_bucket != settings.minio_bucket_raw_outputs:
+        raise ValidationError("raw plugin output metadata is invalid")
+
+    safe_plugin_name = normalize_safe_filename(plugin_result.plugin_name.replace(".", "_"))
+    return DownloadSpec(
+        bucket=plugin_result.raw_output_bucket,
+        key=plugin_result.raw_output_key,
+        filename=f"{safe_plugin_name}_raw_output.json",
+        media_type="application/json",
+        missing_message="Raw plugin output is not available for this plugin result.",
     )

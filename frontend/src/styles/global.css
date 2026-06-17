@@ -69,6 +69,7 @@ a { color: inherit; }
 
 .table-block { display: grid; gap: 8px; }
 .table-note { color: #63717d; font-size: 13px; margin: 0; }
+.result-load-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .table-cell-title { display: block; }
 .long-text { max-width: 360px; overflow-wrap: anywhere; }
 .code-value { display: inline-block; max-width: min(100%, 72ch); overflow-wrap: anywhere; vertical-align: bottom; white-space: normal; }

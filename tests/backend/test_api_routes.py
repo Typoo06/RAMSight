@@ -4,7 +4,7 @@ from app.main import app
 
 
 def test_expected_routes_are_registered() -> None:
-    routes = {route.path for route in app.routes}
+    routes = set(app.openapi()["paths"])
 
     assert "/health" in routes
     assert "/ready" in routes
@@ -27,18 +27,26 @@ def test_expected_routes_are_registered() -> None:
     assert "/api/v1/analysis-jobs/{job_id}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/status" in routes
     assert "/api/v1/analysis-jobs/{job_id}/plugin-results" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/plugin-results/export.json" in routes
     assert "/api/v1/plugin-results/{plugin_result_id}" in routes
+    assert "/api/v1/plugin-results/{plugin_result_id}/raw-output/download" in routes
     assert "/api/v1/analysis-jobs/{job_id}/artifacts/processes" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/processes/export.{export_format}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/artifacts/commands" in routes
     assert "/api/v1/analysis-jobs/{job_id}/artifacts/network" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/network/export.{export_format}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/artifacts/modules" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/modules/export.{export_format}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/artifacts/memory-regions" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/memory-regions/export.{export_format}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/artifacts/yara-matches" in routes
+    assert "/api/v1/analysis-jobs/{job_id}/artifacts/yara-matches/export.{export_format}" in routes
     assert "/api/v1/analysis-jobs/{job_id}/iocs/export.json" in routes
     assert "/api/v1/analysis-jobs/{job_id}/iocs/export.csv" in routes
     assert "/api/v1/analysis-jobs/{job_id}/iocs/export.{export_format}" in routes
     assert "/api/v1/iocs" in routes
     assert "/api/v1/risk-findings" in routes
+    assert "/api/v1/risk-findings/export.{export_format}" in routes
     assert "/api/v1/reports" in routes
     assert "/api/v1/reports/{report_id}" in routes
     assert "/api/v1/reports/{report_id}/download" in routes

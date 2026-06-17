@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiDownloadUrl, apiRequest } from "./client";
 import type {
   CommandArtifact,
   ListResponse,
@@ -53,6 +53,16 @@ function artifactQuery(params: ArtifactQueryParams): string {
   return query.toString();
 }
 
+function artifactExportQuery(params: ArtifactQueryParams): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params) as Array<[string, string | number | boolean | undefined]>) {
+    if (key === "limit" || key === "offset") continue;
+    if (value === undefined || value === "") continue;
+    query.set(key, String(value));
+  }
+  return query.toString();
+}
+
 export function listProcessArtifacts(jobId: string, params: ArtifactListParams = {}): Promise<ListResponse<ProcessArtifact>> {
   return apiRequest<ListResponse<ProcessArtifact>>(`/api/v1/analysis-jobs/${jobId}/artifacts/processes?${artifactQuery(params)}`);
 }
@@ -75,4 +85,19 @@ export function listMemoryRegionArtifacts(jobId: string, params: MemoryRegionArt
 
 export function listYaraMatches(jobId: string, params: YaraMatchListParams = {}): Promise<ListResponse<YaraMatchArtifact>> {
   return apiRequest<ListResponse<YaraMatchArtifact>>(`/api/v1/analysis-jobs/${jobId}/artifacts/yara-matches?${artifactQuery(params)}`);
+}
+
+
+export type ArtifactExportType = "processes" | "network" | "modules" | "memory-regions" | "yara-matches";
+export type ArtifactExportFormat = "json" | "csv";
+
+export function artifactExportDownloadUrl(
+  jobId: string,
+  artifactType: ArtifactExportType,
+  format: ArtifactExportFormat = "json",
+  params: ArtifactQueryParams = {},
+): string {
+  const query = artifactExportQuery(params);
+  const suffix = query ? `?${query}` : "";
+  return apiDownloadUrl(`/api/v1/analysis-jobs/${jobId}/artifacts/${artifactType}/export.${format}${suffix}`);
 }

@@ -142,13 +142,13 @@ def test_html_report_renders_process_summary_without_raw_dict_text() -> None:
     assert "Critical risk process: WinRAR.exe" in html
     assert "WinRAR.exe (PID 2924)" in html
     assert "memory_region" in html
-    assert "YARA scanning completed and YARA match artifacts are summarized below." in html
+    assert "YARA scanning completed." in html
     assert "Third-party YARA rules are defensive triage aids" in html
     assert "{&#39;pid&#39;" not in html
     assert "{'pid':" not in html
 
 
-def test_html_report_includes_display_cap_note_and_plugin_status_table() -> None:
+def test_html_report_includes_plugin_status_table_without_filtering_notes() -> None:
     case_id = uuid4()
     evidence_id = uuid4()
     job_id = uuid4()
@@ -180,7 +180,8 @@ def test_html_report_includes_display_cap_note_and_plugin_status_table() -> None
 
     assert "Parsed records" in html
     assert "windows.pslist" in html
-    assert "21 additional similar or lower-priority findings were omitted" in html
+    forbidden_terms = ["false positive", "filtered for demo", "hidden findings", "noise reduction applied", "additional similar or lower-priority findings were omitted"]
+    assert all(term not in html.lower() for term in forbidden_terms)
 
 
 def test_html_report_renders_capped_artifact_sections_with_context_notes() -> None:
@@ -266,14 +267,14 @@ def test_html_report_renders_capped_artifact_sections_with_context_notes() -> No
     assert "Memory-only Evidence Chains" in html
     assert "Threat-Oriented IOCs" in html
     assert "Investigation Artifacts" in html
-    assert "This table is capped for readability" in html
-    assert "Showing 2 of 5 network artifacts. 3 rows were omitted" in html
     assert "Public remote endpoint" in html
     assert "Listening service socket shown as context" in html
-    assert "Known Microsoft AppData module paths are shown as context" in html
-    assert "Known Microsoft AppData context (onedrive)" in html
+    assert "Known Microsoft AppData context (onedrive)" not in html
+    assert "Known Microsoft AppData module paths are shown as context" not in html
     assert "Unknown or user-writable module path" in html
-    assert "standalone proof of compromise" in html
-    assert "Showing 2 representative module-path rows from 3 selected module artifacts" in html
+    assert "standalone proof of compromise" not in html
+    assert "omitted" not in html.lower()
+    assert "filtered" not in html.lower()
+    assert "false positive" not in html.lower()
     assert "{&#39;pid&#39;" not in html
     assert "{'pid':" not in html

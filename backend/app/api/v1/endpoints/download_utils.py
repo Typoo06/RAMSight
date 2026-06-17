@@ -1,9 +1,10 @@
 # Shared response helpers for DB-backed object downloads.
 
 from fastapi import HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.services.download_service import DownloadSpec
+from app.services.result_export_service import ExportFile
 from app.storage.client import ObjectStorageClient, StorageDownloadError, StorageObjectNotFoundError
 
 
@@ -20,3 +21,8 @@ def storage_download_response(spec: DownloadSpec, storage_client: ObjectStorageC
         headers["Content-Length"] = str(storage_object.size_bytes)
 
     return StreamingResponse(storage_object.iter_chunks(), media_type=spec.media_type, headers=headers)
+
+
+def generated_export_response(export_file: ExportFile) -> Response:
+    headers = {"Content-Disposition": f'attachment; filename="{export_file.filename}"'}
+    return Response(content=export_file.content, media_type=export_file.media_type, headers=headers)

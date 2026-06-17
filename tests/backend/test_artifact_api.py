@@ -272,3 +272,93 @@ def test_yara_matches_serialize_big_integer_offsets_and_filter_pid_safely(client
     assert len(items) == 1
     assert items[0]["offset"] == large_offset
     assert items[0]["target_identifier"] == "PID 340"
+
+def test_artifact_export_json_is_job_scoped_and_omits_raw_record(client_context) -> None:
+    client, session_factory = client_context
+    db = session_factory()
+    try:
+        evidence_one, job_one = seed_job(db, "CASE-ARTIFACT-EXPORT-1")
+        evidence_two, job_two = seed_job(db, "CASE-ARTIFACT-EXPORT-2")
+        db.add_all(
+            [
+                ProcessArtifact(
+                    analysis_job_id=job_one.id,
+                    evidence_id=evidence_one.id,
+                    os_family="windows",
+                    source_plugin="windows.pslist",
+                    pid=340,
+                    name="svchost.exe",
+                    raw_record={"should": "stay out of export"},
+                ),
+                ProcessArtifact(
+                    analysis_job_id=job_two.id,
+                    evidence_id=evidence_two.id,
+                    os_family="windows",
+                    source_plugin="windows.pslist",
+                    pid=999,
+                    name="other.exe",
+                ),
+            ]
+        )
+        db.commit()
+        job_one_id = str(job_one.id)
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/analysis-jobs/{job_one_id}/artifacts/processes/export.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="process_artifacts.json"'
+    payload = response.json()
+    assert payload["kind"] == "process_artifacts"
+    assert payload["count"] == 1
+    assert payload["items"][0]["name"] == "svchost.exe"
+    assert "raw_record" not in payload["items"][0]
+
+
+def test_yara_match_export_csv_serializes_big_integer_offsets(client_context) -> None:
+    client, session_factory = client_context
+    db = session_factory()
+    try:
+        evidence, job = seed_job(db, "CASE-YARA-EXPORT")
+        large_offset = 9_223_372_000
+        db.add(
+            YaraMatch(
+                analysis_job_id=job.id,
+                evidence_id=evidence.id,
+                os_family="windows",
+                source_plugin="windows.vadyarascan",
+                rule_name="RAMSight_Demo_Injection_API_Cluster",
+                target_type="process_memory",
+                target_identifier="PID 340",
+                offset=large_offset,
+                extra_data={"pid": 340, "offset_raw": hex(large_offset)},
+            )
+        )
+        db.commit()
+        job_id = str(job.id)
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/analysis-jobs/{job_id}/artifacts/yara-matches/export.csv")
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="yara_matches.csv"'
+    assert "9223372000" in response.text
+    assert "RAMSight_Demo_Injection_API_Cluster" in response.text
+
+
+def test_artifact_export_rejects_unsupported_format(client_context) -> None:
+    client, session_factory = client_context
+    db = session_factory()
+    try:
+        _, job = seed_job(db, "CASE-ARTIFACT-EXPORT-BAD-FORMAT")
+        db.commit()
+        job_id = str(job.id)
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/analysis-jobs/{job_id}/artifacts/memory-regions/export.xml")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported export format"

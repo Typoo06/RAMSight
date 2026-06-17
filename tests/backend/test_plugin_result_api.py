@@ -83,7 +83,11 @@ def test_plugin_results_list_filters_by_job_status_and_plugin_name(client_contex
 
     response = client.get(f"/api/v1/analysis-jobs/{job_one_id}/plugin-results", params={"status": "completed"})
     assert response.status_code == 200
-    assert [item["id"] for item in response.json()["items"]] == [first_id]
+    payload = response.json()
+    assert [item["id"] for item in payload["items"]] == [first_id]
+    assert payload["total"] == 1
+    assert payload["limit"] == 100
+    assert payload["offset"] == 0
 
     plugin_response = client.get(
         f"/api/v1/analysis-jobs/{job_one_id}/plugin-results",
@@ -93,8 +97,35 @@ def test_plugin_results_list_filters_by_job_status_and_plugin_name(client_contex
     item = plugin_response.json()["items"][0]
     assert item["plugin_name"] == "windows.pslist"
     assert item["raw_output_key"].endswith("windows.pslist.json")
+    assert plugin_response.json()["total"] == 1
+    assert plugin_response.json()["limit"] == 1
+    assert plugin_response.json()["offset"] == 0
     assert "stdout" not in item
     assert "stderr" not in item
+
+
+def test_plugin_result_export_json_uses_metadata_only(client_context) -> None:
+    client, session_factory = client_context
+    db = session_factory()
+    try:
+        evidence, job = seed_job(db, "CASE-PLUGIN-EXPORT")
+        seed_plugin_result(db, job, evidence, "windows.pslist")
+        seed_plugin_result(db, job, evidence, "windows.malfind", status="failed")
+        db.commit()
+        job_id = str(job.id)
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/analysis-jobs/{job_id}/plugin-results/export.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="plugin_results.json"'
+    payload = response.json()
+    assert payload["kind"] == "plugin_results"
+    assert payload["count"] == 2
+    assert {item["plugin_name"] for item in payload["items"]} == {"windows.pslist", "windows.malfind"}
+    assert "stdout" not in payload["items"][0]
+    assert "stderr" not in payload["items"][0]
 
 
 def test_plugin_result_detail_and_missing_id(client_context) -> None:

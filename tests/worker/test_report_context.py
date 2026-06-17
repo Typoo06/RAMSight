@@ -57,9 +57,9 @@ def test_report_context_summary_counts_and_top_findings_ordering() -> None:
     assert context["summary"]["completed_plugins"] == 1
     assert context["summary"]["failed_plugins"] == 1
     assert context["summary"]["total_parsed_artifacts"] == 2
-    assert context["summary"]["total_risk_findings"] == 3
+    assert context["summary"]["total_risk_findings"] == 0
     assert context["summary"]["total_ioc_records"] == 1
-    assert [finding["rule_name"] for finding in context["top_findings"]] == ["Critical", "High", "Medium"]
+    assert context["top_findings"] == []
 
 
 def test_report_context_preserves_final_job_status_metadata() -> None:
@@ -232,7 +232,17 @@ def test_report_context_groups_yara_rules_and_counts() -> None:
         job,
         plugin_results=[{"plugin_name": "windows.vadyarascan", "status": "completed", "extra_data": {"is_yara_plugin": True}}],
         artifacts=artifacts,
-        risk_findings=[],
+        risk_findings=[
+            {
+                "id": uuid4(),
+                "rule_name": "Cobalt Strike YARA match in process memory",
+                "severity": "high",
+                "score": 9,
+                "artifact_type": "yara_matches",
+                "category": "memory_only",
+                "extra_data": {"pid": 10, "process_name": "powershell.exe", "evidence_groups": ["memory_region", "yara_match"], "rule_name": "RuleA"},
+            }
+        ],
         iocs=[],
         generated_at=datetime(2026, 5, 24, tzinfo=timezone.utc),
     )
@@ -297,8 +307,7 @@ def test_report_context_separates_threat_iocs_from_investigation_artifacts() -> 
     )
 
     assert {row["ioc_type"] for row in context["threat_ioc_summary"]} == {"network_endpoint", "yara_rule"}
-    investigation_types = {row["ioc_type"] for row in context["investigation_artifact_summary"]}
-    assert {"pid", "memory_region", "plugin_reference", "yara_rule"} <= investigation_types
+    assert context["investigation_artifact_summary"] == []
 
 
 def test_report_context_deduplicates_and_caps_top_findings_for_display() -> None:
@@ -430,14 +439,111 @@ def test_report_context_groups_module_paths_and_annotates_microsoft_context() ->
 
     display = context["module_display"]
     assert display["total_count"] == 8
-    assert display["selected_count"] == 7
-    assert display["displayed_count"] == 3
-    assert display["omitted_count"] == 4
-    assert display["known_context_count"] == 6
+    assert display["selected_count"] == 1
+    assert display["displayed_count"] == 1
+    assert display["omitted_count"] == 0
+    assert display["known_context_count"] == 0
     assert display["suspicious_count"] == 1
     assert display["rows"][0]["classification"] == "Unknown or user-writable module path"
     assert display["rows"][0]["module_path"].endswith("OddVendor\\payload.dll")
-    known_rows = [row for row in display["rows"] if row["classification"].startswith("Known Microsoft AppData context")]
-    assert known_rows
-    assert any(row["similar_count"] == 5 and "onedrive" in row["classification"] for row in known_rows)
-    assert all("standalone proof of compromise" in row["context_note"] for row in known_rows)
+    assert not [row for row in display["rows"] if row["classification"].startswith("Known Microsoft AppData context")]
+
+
+
+def test_report_context_hides_broad_yara_only_findings_without_correlation() -> None:
+    case, evidence, job = base_rows()
+    findings = [
+        {
+            "id": uuid4(),
+            "rule_name": "RAMSight_Demo_PE_Header_In_Memory_Candidate",
+            "title": "Demo PE header triage indicator",
+            "severity": "medium",
+            "score": 5,
+            "artifact_type": "yara_matches",
+            "category": "yara",
+            "extra_data": {"pid": 484, "process_name": "svchost.exe", "noisy": True, "requires_correlation": True, "evidence_groups": ["yara_match"]},
+        }
+    ]
+
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=findings,
+        iocs=[],
+    )
+
+    assert len(findings) == 1
+    assert context["risk_findings"] == []
+    assert context["display_top_findings"] == []
+
+
+def test_report_context_keeps_memory_yara_and_memory_network_correlations() -> None:
+    case, evidence, job = base_rows()
+    findings = [
+        {
+            "id": uuid4(),
+            "rule_name": "Cobalt Strike YARA match in process memory",
+            "title": "YARA match in process memory",
+            "severity": "high",
+            "score": 10,
+            "artifact_type": "yara_matches",
+            "category": "memory_only",
+            "extra_data": {"pid": 14484, "process_name": "powershell.exe", "evidence_groups": ["memory_region", "yara_match"], "rule_name": "CobaltStrike_Beacon"},
+        },
+        {
+            "id": uuid4(),
+            "rule_name": "Executable memory region with network activity",
+            "title": "Executable memory region with network activity",
+            "severity": "critical",
+            "score": 14,
+            "artifact_type": "memory_region_artifacts",
+            "category": "memory_only",
+            "extra_data": {"pid": 12292, "process_name": "smartscreen.ex", "evidence_groups": ["memory_region", "network_endpoint"], "remote_address": "45.77.1.2", "remote_port": 443},
+        },
+    ]
+
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=findings,
+        iocs=[],
+    )
+
+    titles = {finding["title"] for finding in context["display_top_findings"]}
+    assert "YARA match in process memory" in titles
+    assert "Executable memory region with network activity" in titles
+    assert len(findings) == 2
+
+
+def test_report_context_hides_context_only_normal_process_without_correlation() -> None:
+    case, evidence, job = base_rows()
+    findings = [
+        {
+            "id": uuid4(),
+            "rule_name": "Context only process note",
+            "title": "Context only process note",
+            "severity": "medium",
+            "score": 4,
+            "category": "process_context",
+            "extra_data": {"pid": 5000, "process_name": "elastic-endpoi", "detection_confidence": "context_only"},
+        }
+    ]
+
+    context = build_report_context(
+        case,
+        evidence,
+        job,
+        plugin_results=[],
+        artifacts={"process_artifacts": [], "network_artifacts": [], "module_artifacts": [], "memory_region_artifacts": [], "command_artifacts": [], "yara_matches": []},
+        risk_findings=findings,
+        iocs=[],
+    )
+
+    assert context["risk_findings"] == []
+    assert context["display_top_findings"] == []

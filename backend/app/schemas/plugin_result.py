@@ -33,3 +33,6 @@ class PluginResultRead(OrmModel):
 
 class PluginResultListResponse(BaseModel):
     items: list[PluginResultRead]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None

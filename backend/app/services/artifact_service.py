@@ -295,3 +295,58 @@ def count_yara_matches(
 ) -> int:
     validate_analysis_job(db, job_id)
     return count_statement(db, yara_match_statement(job_id, pid, source_plugin, rule_name, target_identifier))
+
+
+def export_process_artifacts(
+    db: Session, job_id: UUID, pid: int | None = None, process_name: str | None = None, source_plugin: str | None = None
+) -> list[ProcessArtifact]:
+    validate_analysis_job(db, job_id)
+    return list(db.execute(process_artifact_statement(job_id, pid, process_name, source_plugin).order_by(ProcessArtifact.pid.asc())).scalars())
+
+
+def export_network_artifacts(
+    db: Session,
+    job_id: UUID,
+    pid: int | None = None,
+    process_name: str | None = None,
+    source_plugin: str | None = None,
+    remote_address: str | None = None,
+    protocol: str | None = None,
+) -> list[NetworkArtifact]:
+    validate_analysis_job(db, job_id)
+    statement = network_artifact_statement(job_id, pid, process_name, source_plugin, remote_address, protocol)
+    return list(db.execute(statement.order_by(NetworkArtifact.pid.asc())).scalars())
+
+
+def export_module_artifacts(
+    db: Session, job_id: UUID, pid: int | None = None, process_name: str | None = None, source_plugin: str | None = None
+) -> list[ModuleArtifact]:
+    validate_analysis_job(db, job_id)
+    return list(db.execute(module_artifact_statement(job_id, pid, process_name, source_plugin).order_by(ModuleArtifact.pid.asc())).scalars())
+
+
+def export_memory_region_artifacts(
+    db: Session,
+    job_id: UUID,
+    pid: int | None = None,
+    process_name: str | None = None,
+    source_plugin: str | None = None,
+    executable_only: bool | None = None,
+    suspicious_only: bool | None = None,
+) -> list[MemoryRegionArtifact]:
+    validate_analysis_job(db, job_id)
+    statement = memory_region_artifact_statement(job_id, pid, process_name, source_plugin, executable_only, suspicious_only)
+    return list(db.execute(statement.order_by(MemoryRegionArtifact.pid.asc())).scalars())
+
+
+def export_yara_matches(
+    db: Session,
+    job_id: UUID,
+    pid: int | None = None,
+    source_plugin: str | None = None,
+    rule_name: str | None = None,
+    target_identifier: str | None = None,
+) -> list[YaraMatch]:
+    validate_analysis_job(db, job_id)
+    statement = yara_match_statement(job_id, pid, source_plugin, rule_name, target_identifier)
+    return list(db.execute(statement.order_by(YaraMatch.created_at.asc())).scalars())

@@ -221,3 +221,38 @@ def test_list_risk_findings_filters_by_review_status_and_effective_severity(clie
     assert [item["title"] for item in by_effective.json()["items"]] == ["One"]
     assert by_job.status_code == 200
     assert [item["title"] for item in by_job.json()["items"]] == ["One"]
+
+def test_risk_finding_export_json_and_csv_are_filterable(client_context) -> None:
+    client, session_factory = client_context
+    db = session_factory()
+    try:
+        _, _, job, finding_one = seed_finding(db, "CASE-FINDING-EXPORT-1", title="Memory region candidate")
+        _, _, _, finding_two = seed_finding(db, "CASE-FINDING-EXPORT-2", title="Other case finding")
+        finding_two.category = "network"
+        db.commit()
+        job_id = str(job.id)
+    finally:
+        db.close()
+
+    json_response = client.get("/api/v1/risk-findings/export.json", params={"job_id": job_id, "category": "memory_region"})
+    csv_response = client.get("/api/v1/risk-findings/export.csv", params={"job_id": job_id})
+
+    assert json_response.status_code == 200
+    assert json_response.headers["content-disposition"] == 'attachment; filename="risk_findings.json"'
+    payload = json_response.json()
+    assert payload["kind"] == "risk_findings"
+    assert payload["count"] == 1
+    assert payload["items"][0]["title"] == "Memory region candidate"
+    assert csv_response.status_code == 200
+    assert csv_response.headers["content-disposition"] == 'attachment; filename="risk_findings.csv"'
+    assert "Memory region candidate" in csv_response.text
+    assert "Other case finding" not in csv_response.text
+
+
+def test_risk_finding_export_rejects_unsupported_format(client_context) -> None:
+    client, _ = client_context
+
+    response = client.get("/api/v1/risk-findings/export.xml")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported export format"

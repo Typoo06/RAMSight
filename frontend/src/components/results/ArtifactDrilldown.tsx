@@ -64,7 +64,7 @@ function offsetText(offset: number | string | null): string {
 
 function CappedNote({ limit, total }: { limit: number; total: number }) {
   if (total <= limit) return null;
-  return <p className="table-note">Showing {limit} of {total} normalized artifact rows. Use Focus PID or backend APIs for the full stored set.</p>;
+  return <p className="table-note">Showing {limit} of {total} loaded normalized artifact rows.</p>;
 }
 
 export function MemoryRegionTable({ caption, memoryRegions, limit = 50 }: MemoryRegionTableProps) {
@@ -149,7 +149,7 @@ export function ArtifactDrilldown({
   processArtifacts,
   yaraMatches,
 }: ArtifactDrilldownProps) {
-  const focusedLimit = 20;
+  const focusedLimit = Number.MAX_SAFE_INTEGER;
 
   return (
     <div className="page-stack compact-stack">

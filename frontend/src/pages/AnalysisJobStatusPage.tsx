@@ -8,11 +8,12 @@ import {
   listNetworkArtifacts,
   listProcessArtifacts,
   listYaraMatches,
+  artifactExportDownloadUrl,
 } from "../api/artifacts";
 import { iocExportDownloadUrl, listIOCs } from "../api/iocs";
-import { listPluginResults } from "../api/pluginResults";
-import { listReports } from "../api/reports";
-import { listRiskFindings } from "../api/riskFindings";
+import { listPluginResults, pluginResultsExportDownloadUrl } from "../api/pluginResults";
+import { listReports, reportDownloadUrl } from "../api/reports";
+import { listRiskFindings, riskFindingExportDownloadUrl } from "../api/riskFindings";
 import { ArtifactDrilldown, MemoryRegionTable, YaraMatchTable } from "../components/results/ArtifactDrilldown";
 import { FindingTable } from "../components/results/FindingTable";
 import { IocTable } from "../components/results/IocTable";
@@ -70,6 +71,10 @@ function terminalResultEmptyMessage(jobStatus: string, completedMessage: string)
 }
 
 const YARA_PLUGIN_NAMES = new Set(["windows.vadyarascan", "yarascan", "linux.vmayarascan"]);
+
+const RESULT_PAGE_SIZE = 100;
+const ARTIFACT_PAGE_SIZE = 100;
+const PLUGIN_PAGE_SIZE = 100;
 
 const PROFILE_LABELS: Record<string, string> = {
   windows_default: "Standard Windows triage",
@@ -229,6 +234,32 @@ function metricDetail(total: number | null, loaded: number, label: string): stri
   if (total === loaded) return `${total.toLocaleString()} total`;
   const hidden = Math.max(total - loaded, 0);
   return `${total.toLocaleString()} total · showing ${loaded.toLocaleString()}${hidden > 0 ? ` · ${hidden.toLocaleString()} not loaded` : ""}`;
+}
+
+function remainingCount(total: number | null, loaded: number): number | null {
+  if (total === null) return null;
+  return Math.max(total - loaded, 0);
+}
+
+function LoadedRecordsNote({ label, loaded, total }: { label: string; loaded: number; total: number | null }) {
+  const remaining = remainingCount(total, loaded);
+  return (
+    <p className="table-note">
+      {total === null
+        ? `${loaded.toLocaleString()} ${label} loaded.`
+        : `Showing ${loaded.toLocaleString()} of ${total.toLocaleString()} ${label}.${remaining ? ` ${remaining.toLocaleString()} remaining unloaded.` : ""}`}
+    </p>
+  );
+}
+
+function LoadMoreButton({ disabled, label, loaded, onClick, total }: { disabled?: boolean; label: string; loaded: number; onClick: () => void; total: number | null }) {
+  const remaining = remainingCount(total, loaded);
+  if (remaining !== null && remaining <= 0) return null;
+  return (
+    <button className="button button-secondary button-small" disabled={disabled} type="button" onClick={onClick}>
+      Load more {label}
+    </button>
+  );
 }
 
 interface ProcessEvidenceBundle {
@@ -466,6 +497,7 @@ export function AnalysisJobStatusPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [commandArtifacts, setCommandArtifacts] = useState<CommandArtifact[]>([]);
+  const [commandArtifactTotal, setCommandArtifactTotal] = useState<number | null>(null);
   const [drilldownError, setDrilldownError] = useState<string | null>(null);
   const [drilldownLoading, setDrilldownLoading] = useState(true);
   const [findingError, setFindingError] = useState<string | null>(null);
@@ -481,16 +513,26 @@ export function AnalysisJobStatusPage() {
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [memoryRegions, setMemoryRegions] = useState<MemoryRegionArtifact[]>([]);
+  const [memoryRegionTotal, setMemoryRegionTotal] = useState<number | null>(null);
   const [moduleArtifacts, setModuleArtifacts] = useState<ModuleArtifact[]>([]);
+  const [moduleArtifactTotal, setModuleArtifactTotal] = useState<number | null>(null);
   const [networkArtifacts, setNetworkArtifacts] = useState<NetworkArtifact[]>([]);
+  const [networkArtifactTotal, setNetworkArtifactTotal] = useState<number | null>(null);
   const [pluginResults, setPluginResults] = useState<PluginResult[]>([]);
+  const [pluginResultTotal, setPluginResultTotal] = useState<number | null>(null);
   const [processEvidenceByPid, setProcessEvidenceByPid] = useState<Record<number, ProcessEvidenceBundle>>({});
   const [processArtifacts, setProcessArtifacts] = useState<ProcessArtifact[]>([]);
+  const [processArtifactTotal, setProcessArtifactTotal] = useState<number | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reports, setReports] = useState<Report[]>([]);
   const [reviewStatusFilter, setReviewStatusFilter] = useState("all");
   const [yaraMatches, setYaraMatches] = useState<YaraMatchArtifact[]>([]);
+  const [yaraMatchTotal, setYaraMatchTotal] = useState<number | null>(null);
+  const [loadingMoreFindings, setLoadingMoreFindings] = useState(false);
+  const [loadingMoreIocs, setLoadingMoreIocs] = useState(false);
+  const [loadingMorePluginResults, setLoadingMorePluginResults] = useState(false);
+  const [loadingMoreArtifacts, setLoadingMoreArtifacts] = useState<string | null>(null);
   const reviewStatusParam = reviewStatusFilter === "all" ? undefined : reviewStatusFilter;
 
   useEffect(() => {
@@ -527,14 +569,14 @@ export function AnalysisJobStatusPage() {
     if (focusPidInvalid) return;
 
     let active = true;
-    const artifactFilters = focusPid === null ? { limit: 100 } : { pid: focusPid, limit: 100 };
+    const artifactFilters = focusPid === null ? { limit: ARTIFACT_PAGE_SIZE } : { pid: focusPid, limit: ARTIFACT_PAGE_SIZE };
 
     Promise.resolve().then(() => {
       if (!active) return null;
       setDrilldownLoading(true);
       setDrilldownError(null);
       return Promise.allSettled([
-      listPluginResults(jobId, { limit: 100 }),
+      listPluginResults(jobId, { limit: PLUGIN_PAGE_SIZE }),
       listProcessArtifacts(jobId, artifactFilters),
       listCommandArtifacts(jobId, artifactFilters),
       listNetworkArtifacts(jobId, artifactFilters),
@@ -548,25 +590,46 @@ export function AnalysisJobStatusPage() {
       const [pluginResult, processResult, commandResult, networkResult, moduleResult, memoryResult, yaraResult] = results;
       const errors: string[] = [];
 
-      if (pluginResult.status === "fulfilled") setPluginResults(pluginResult.value.items);
+      if (pluginResult.status === "fulfilled") {
+        setPluginResults(pluginResult.value.items);
+        setPluginResultTotal(pluginResult.value.total ?? pluginResult.value.items.length);
+      }
       else errors.push(pluginResult.reason instanceof Error ? pluginResult.reason.message : "RAMSight could not load plugin results.");
 
-      if (processResult.status === "fulfilled") setProcessArtifacts(processResult.value.items);
+      if (processResult.status === "fulfilled") {
+        setProcessArtifacts(processResult.value.items);
+        setProcessArtifactTotal(processResult.value.total ?? processResult.value.items.length);
+      }
       else errors.push(processResult.reason instanceof Error ? processResult.reason.message : "RAMSight could not load process artifacts.");
 
-      if (commandResult.status === "fulfilled") setCommandArtifacts(commandResult.value.items);
+      if (commandResult.status === "fulfilled") {
+        setCommandArtifacts(commandResult.value.items);
+        setCommandArtifactTotal(commandResult.value.total ?? commandResult.value.items.length);
+      }
       else errors.push(commandResult.reason instanceof Error ? commandResult.reason.message : "RAMSight could not load command artifacts.");
 
-      if (networkResult.status === "fulfilled") setNetworkArtifacts(networkResult.value.items);
+      if (networkResult.status === "fulfilled") {
+        setNetworkArtifacts(networkResult.value.items);
+        setNetworkArtifactTotal(networkResult.value.total ?? networkResult.value.items.length);
+      }
       else errors.push(networkResult.reason instanceof Error ? networkResult.reason.message : "RAMSight could not load network artifacts.");
 
-      if (moduleResult.status === "fulfilled") setModuleArtifacts(moduleResult.value.items);
+      if (moduleResult.status === "fulfilled") {
+        setModuleArtifacts(moduleResult.value.items);
+        setModuleArtifactTotal(moduleResult.value.total ?? moduleResult.value.items.length);
+      }
       else errors.push(moduleResult.reason instanceof Error ? moduleResult.reason.message : "RAMSight could not load module artifacts.");
 
-      if (memoryResult.status === "fulfilled") setMemoryRegions(memoryResult.value.items);
+      if (memoryResult.status === "fulfilled") {
+        setMemoryRegions(memoryResult.value.items);
+        setMemoryRegionTotal(memoryResult.value.total ?? memoryResult.value.items.length);
+      }
       else errors.push(memoryResult.reason instanceof Error ? memoryResult.reason.message : "RAMSight could not load memory region artifacts.");
 
-      if (yaraResult.status === "fulfilled") setYaraMatches(yaraResult.value.items);
+      if (yaraResult.status === "fulfilled") {
+        setYaraMatches(yaraResult.value.items);
+        setYaraMatchTotal(yaraResult.value.total ?? yaraResult.value.items.length);
+      }
       else errors.push(yaraResult.reason instanceof Error ? yaraResult.reason.message : "RAMSight could not load YARA match artifacts.");
 
       setDrilldownError(errors[0] ?? null);
@@ -583,8 +646,8 @@ export function AnalysisJobStatusPage() {
     let active = true;
 
     Promise.allSettled([
-      listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: 500 }),
-      listIOCs({ job_id: jobId, limit: 500 }),
+      listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: RESULT_PAGE_SIZE }),
+      listIOCs({ job_id: jobId, limit: RESULT_PAGE_SIZE }),
       listReports({ job_id: jobId, limit: 100 }),
     ]).then(([findingResult, iocResult, reportResult]) => {
       if (!active) return;
@@ -623,7 +686,7 @@ export function AnalysisJobStatusPage() {
       if (!active) return null;
       setFindingLoading(true);
       return Promise.all([
-        listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: 500 }),
+        listRiskFindings({ job_id: jobId, review_status: reviewStatusParam, limit: RESULT_PAGE_SIZE }),
         listRiskFindings({ job_id: jobId, severity_effective: "high", limit: 1 }),
         listRiskFindings({ job_id: jobId, severity_effective: "critical", limit: 1 }),
       ]);
@@ -646,7 +709,7 @@ export function AnalysisJobStatusPage() {
         if (active) setFindingLoading(false);
       });
 
-    listIOCs({ job_id: jobId, limit: 500 })
+    listIOCs({ job_id: jobId, limit: RESULT_PAGE_SIZE })
       .then((response) => {
         if (active) {
           setIocs(response.items);
@@ -707,6 +770,111 @@ export function AnalysisJobStatusPage() {
       }
       return current.map((finding) => (finding.id === updatedFinding.id ? updatedFinding : finding));
     });
+  }
+
+  async function loadMoreFindings() {
+    if (!jobId || loadingMoreFindings) return;
+    setLoadingMoreFindings(true);
+    try {
+      const response = await listRiskFindings({
+        job_id: jobId,
+        review_status: reviewStatusParam,
+        limit: RESULT_PAGE_SIZE,
+        offset: findings.length,
+      });
+      setFindings((current) => mergeById(current, response.items));
+      setFindingTotal(response.total ?? findingTotal);
+    } catch (err) {
+      setFindingError(err instanceof Error ? err.message : "RAMSight could not load more risk findings.");
+    } finally {
+      setLoadingMoreFindings(false);
+    }
+  }
+
+  async function loadMoreIocs() {
+    if (!jobId || loadingMoreIocs) return;
+    setLoadingMoreIocs(true);
+    try {
+      const response = await listIOCs({ job_id: jobId, limit: RESULT_PAGE_SIZE, offset: iocs.length });
+      setIocs((current) => mergeById(current, response.items));
+      setIocTotal(response.total ?? iocTotal);
+    } catch (err) {
+      setIocError(err instanceof Error ? err.message : "RAMSight could not load more IOC records.");
+    } finally {
+      setLoadingMoreIocs(false);
+    }
+  }
+
+  async function loadMorePluginResults() {
+    if (!jobId || loadingMorePluginResults) return;
+    setLoadingMorePluginResults(true);
+    try {
+      const response = await listPluginResults(jobId, { limit: PLUGIN_PAGE_SIZE, offset: pluginResults.length });
+      setPluginResults((current) => mergeById(current, response.items));
+      setPluginResultTotal(response.total ?? pluginResultTotal);
+    } catch (err) {
+      setDrilldownError(err instanceof Error ? err.message : "RAMSight could not load more plugin results.");
+    } finally {
+      setLoadingMorePluginResults(false);
+    }
+  }
+
+  const artifactPageParams = focusPid === null ? {} : { pid: focusPid };
+
+  async function loadMoreNetworkArtifacts() {
+    if (!jobId || loadingMoreArtifacts) return;
+    setLoadingMoreArtifacts("network");
+    try {
+      const response = await listNetworkArtifacts(jobId, { ...artifactPageParams, limit: ARTIFACT_PAGE_SIZE, offset: networkArtifacts.length });
+      setNetworkArtifacts((current) => mergeById(current, response.items));
+      setNetworkArtifactTotal(response.total ?? networkArtifactTotal);
+    } catch (err) {
+      setDrilldownError(err instanceof Error ? err.message : "RAMSight could not load more network artifacts.");
+    } finally {
+      setLoadingMoreArtifacts(null);
+    }
+  }
+
+  async function loadMoreModuleArtifacts() {
+    if (!jobId || loadingMoreArtifacts) return;
+    setLoadingMoreArtifacts("modules");
+    try {
+      const response = await listModuleArtifacts(jobId, { ...artifactPageParams, limit: ARTIFACT_PAGE_SIZE, offset: moduleArtifacts.length });
+      setModuleArtifacts((current) => mergeById(current, response.items));
+      setModuleArtifactTotal(response.total ?? moduleArtifactTotal);
+    } catch (err) {
+      setDrilldownError(err instanceof Error ? err.message : "RAMSight could not load more module artifacts.");
+    } finally {
+      setLoadingMoreArtifacts(null);
+    }
+  }
+
+  async function loadMoreMemoryRegions() {
+    if (!jobId || loadingMoreArtifacts) return;
+    setLoadingMoreArtifacts("memory-regions");
+    try {
+      const response = await listMemoryRegionArtifacts(jobId, { ...artifactPageParams, limit: ARTIFACT_PAGE_SIZE, offset: memoryRegions.length });
+      setMemoryRegions((current) => mergeById(current, response.items));
+      setMemoryRegionTotal(response.total ?? memoryRegionTotal);
+    } catch (err) {
+      setDrilldownError(err instanceof Error ? err.message : "RAMSight could not load more memory region artifacts.");
+    } finally {
+      setLoadingMoreArtifacts(null);
+    }
+  }
+
+  async function loadMoreYaraMatches() {
+    if (!jobId || loadingMoreArtifacts) return;
+    setLoadingMoreArtifacts("yara-matches");
+    try {
+      const response = await listYaraMatches(jobId, { ...artifactPageParams, limit: ARTIFACT_PAGE_SIZE, offset: yaraMatches.length });
+      setYaraMatches((current) => mergeById(current, response.items));
+      setYaraMatchTotal(response.total ?? yaraMatchTotal);
+    } catch (err) {
+      setDrilldownError(err instanceof Error ? err.message : "RAMSight could not load more YARA match artifacts.");
+    } finally {
+      setLoadingMoreArtifacts(null);
+    }
   }
   const processRiskSummaries = useMemo(() => sortedFindings.filter(isProcessRiskSummary), [sortedFindings]);
   const jobStatus = job?.status;
@@ -786,10 +954,25 @@ export function AnalysisJobStatusPage() {
   const relationshipInputWarning = findingError || iocError || drilldownSectionError
     ? "Some relationship inputs are unavailable. RAMSight is showing loaded metadata only."
     : null;
+  const firstHtmlReport = reports.find((report) => report.format.toLowerCase() === "html" && report.storage_key);
   const iocExportActions = job ? (
     <div className="button-row">
       <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "json")}>Download IOC JSON</a>
       <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "csv")}>Download IOC CSV</a>
+    </div>
+  ) : null;
+  const resultExportActions = job ? (
+    <div className="button-row export-action-row">
+      {firstHtmlReport && <a className="button button-primary button-small" href={reportDownloadUrl(firstHtmlReport.id)}>Download HTML report</a>}
+      <a className="button button-secondary button-small" href={riskFindingExportDownloadUrl({ job_id: job.id }, "json")}>Export findings JSON</a>
+      <a className="button button-secondary button-small" href={riskFindingExportDownloadUrl({ job_id: job.id }, "csv")}>Export findings CSV</a>
+      <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "json")}>Export IOC JSON</a>
+      <a className="button button-secondary button-small" href={iocExportDownloadUrl(job.id, "csv")}>Export IOC CSV</a>
+      <a className="button button-secondary button-small" href={artifactExportDownloadUrl(job.id, "memory-regions", "json")}>Export all memory artifacts</a>
+      <a className="button button-secondary button-small" href={artifactExportDownloadUrl(job.id, "yara-matches", "json")}>Export all YARA matches</a>
+      <a className="button button-secondary button-small" href={artifactExportDownloadUrl(job.id, "network", "json")}>Export all network artifacts</a>
+      <a className="button button-secondary button-small" href={artifactExportDownloadUrl(job.id, "modules", "json")}>Export all module artifacts</a>
+      <a className="button button-secondary button-small" href={pluginResultsExportDownloadUrl(job.id)}>Export plugin results</a>
     </div>
   ) : null;
 
@@ -860,8 +1043,17 @@ export function AnalysisJobStatusPage() {
         <Card title="High priority"><p className="metric-value">{(highPriorityTotal ?? highPriorityFindings.length).toLocaleString()}</p><p className="muted">{metricDetail(highPriorityTotal, highPriorityFindings.length, "high/critical findings")}</p></Card>
         <Card title="Indicators"><p className="metric-value">{(iocTotal ?? iocs.length).toLocaleString()}</p><p className="muted">{metricDetail(iocTotal, iocs.length, "IOC records")}</p></Card>
         <Card title="Plugin completion"><p className="metric-value metric-value-text">{pluginSummaryValue}</p><p className="muted">{pluginSummaryDetail}</p></Card>
-        <Card title="Reports"><p className="metric-value">{reports.length}</p><p className="muted">{reportSummaryDetail}</p></Card>
+        <Card title="Reports">
+          <p className="metric-value">{reports.length}</p>
+          <p className="muted">{reportSummaryDetail}</p>
+          {firstHtmlReport && <a className="button button-secondary button-small" href={reportDownloadUrl(firstHtmlReport.id)}>Download HTML report</a>}
+        </Card>
       </div>
+
+      <Card title="Result downloads and exports">
+        <p className="muted">Use exports to retrieve the full stored result set without loading every record into the browser. IOC JSON/CSV downloads use the worker-generated IOC export files.</p>
+        {resultExportActions}
+      </Card>
 
       <div className="detail-grid">
         <Card className="status-callout status-callout-info" title="YARA status">
@@ -913,7 +1105,11 @@ export function AnalysisJobStatusPage() {
         empty={supportingFindings.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no supporting risk findings recorded through the current APIs.")}
       >
-        <FindingTable caption="Supporting raw and deduplicated findings; process-level summaries are shown above" findings={supportingFindings} limit={20} onFindingUpdated={handleFindingUpdated} />
+        <div className="page-stack compact-stack">
+          <FindingTable caption="Supporting raw and deduplicated findings; process-level summaries are shown above" findings={supportingFindings} limit={supportingFindings.length} onFindingUpdated={handleFindingUpdated} />
+          <LoadedRecordsNote label="risk findings" loaded={findings.length} total={findingTotal} />
+          <LoadMoreButton disabled={loadingMoreFindings} label="risk findings" loaded={findings.length} onClick={loadMoreFindings} total={findingTotal} />
+        </div>
       </ResultSection>
 
       <ResultSection
@@ -923,7 +1119,11 @@ export function AnalysisJobStatusPage() {
         empty={processRiskSummaries.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "No process risk summary findings are available for this job.")}
       >
-        <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={20} onFindingUpdated={handleFindingUpdated} />
+        <div className="page-stack compact-stack">
+          <FindingTable caption="Process-level risk summaries" findings={processRiskSummaries} limit={processRiskSummaries.length} onFindingUpdated={handleFindingUpdated} />
+          <LoadedRecordsNote label="risk findings" loaded={findings.length} total={findingTotal} />
+          <LoadMoreButton disabled={loadingMoreFindings} label="risk findings" loaded={findings.length} onClick={loadMoreFindings} total={findingTotal} />
+        </div>
       </ResultSection>
 
       <ResultSection
@@ -953,8 +1153,12 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No network findings or network IOC records are available for this job.")}
       >
         <div className="page-stack compact-stack">
-          {networkFindings.length > 0 && <FindingTable caption="Network-related findings" findings={networkFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
-          {networkIocs.length > 0 && <IocTable caption="Network IOC records" iocs={networkIocs} limit={50} />}
+          {networkFindings.length > 0 && <FindingTable caption="Network-related findings" findings={networkFindings} limit={networkFindings.length} onFindingUpdated={handleFindingUpdated} />}
+          {networkIocs.length > 0 && <IocTable caption="Network IOC records" iocs={networkIocs} limit={networkIocs.length} />}
+          <LoadedRecordsNote label="risk findings" loaded={findings.length} total={findingTotal} />
+          <LoadMoreButton disabled={loadingMoreFindings} label="risk findings" loaded={findings.length} onClick={loadMoreFindings} total={findingTotal} />
+          <LoadedRecordsNote label="IOC records" loaded={iocs.length} total={iocTotal} />
+          <LoadMoreButton disabled={loadingMoreIocs} label="IOC records" loaded={iocs.length} onClick={loadMoreIocs} total={iocTotal} />
         </div>
       </ResultSection>
 
@@ -966,8 +1170,12 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No suspicious module or path indicators are available through the current APIs.")}
       >
         <div className="page-stack compact-stack">
-          {moduleFindings.length > 0 && <FindingTable caption="Module/path findings" findings={moduleFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
-          {moduleIocs.length > 0 && <IocTable caption="Module/path IOC records" iocs={moduleIocs} limit={50} />}
+          {moduleFindings.length > 0 && <FindingTable caption="Module/path findings" findings={moduleFindings} limit={moduleFindings.length} onFindingUpdated={handleFindingUpdated} />}
+          {moduleIocs.length > 0 && <IocTable caption="Module/path IOC records" iocs={moduleIocs} limit={moduleIocs.length} />}
+          <LoadedRecordsNote label="risk findings" loaded={findings.length} total={findingTotal} />
+          <LoadMoreButton disabled={loadingMoreFindings} label="risk findings" loaded={findings.length} onClick={loadMoreFindings} total={findingTotal} />
+          <LoadedRecordsNote label="IOC records" loaded={iocs.length} total={iocTotal} />
+          <LoadMoreButton disabled={loadingMoreIocs} label="IOC records" loaded={iocs.length} onClick={loadMoreIocs} total={iocTotal} />
         </div>
       </ResultSection>
 
@@ -979,8 +1187,12 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "No memory region findings are available for this job.")}
       >
         <div className="page-stack compact-stack">
-          {memoryFindings.length > 0 && <FindingTable caption="Memory region findings" findings={memoryFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
-          {memoryIocs.length > 0 && <IocTable caption="Memory region IOC records" iocs={memoryIocs} limit={50} />}
+          {memoryFindings.length > 0 && <FindingTable caption="Memory region findings" findings={memoryFindings} limit={memoryFindings.length} onFindingUpdated={handleFindingUpdated} />}
+          {memoryIocs.length > 0 && <IocTable caption="Memory region IOC records" iocs={memoryIocs} limit={memoryIocs.length} />}
+          <LoadedRecordsNote label="risk findings" loaded={findings.length} total={findingTotal} />
+          <LoadMoreButton disabled={loadingMoreFindings} label="risk findings" loaded={findings.length} onClick={loadMoreFindings} total={findingTotal} />
+          <LoadedRecordsNote label="IOC records" loaded={iocs.length} total={iocTotal} />
+          <LoadMoreButton disabled={loadingMoreIocs} label="IOC records" loaded={iocs.length} onClick={loadMoreIocs} total={iocTotal} />
         </div>
       </ResultSection>
 
@@ -993,8 +1205,12 @@ export function AnalysisJobStatusPage() {
       >
         <div className="page-stack compact-stack">
           <p className="section-note">{yaraMessage}</p>
-          {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={20} onFindingUpdated={handleFindingUpdated} />}
-          {yaraIocs.length > 0 && <IocTable caption="YARA IOC records" iocs={yaraIocs} limit={50} />}
+          {yaraFindings.length > 0 && <FindingTable caption="YARA-related findings" findings={yaraFindings} limit={yaraFindings.length} onFindingUpdated={handleFindingUpdated} />}
+          {yaraIocs.length > 0 && <IocTable caption="YARA IOC records" iocs={yaraIocs} limit={yaraIocs.length} />}
+          <LoadedRecordsNote label="risk findings" loaded={findings.length} total={findingTotal} />
+          <LoadMoreButton disabled={loadingMoreFindings} label="risk findings" loaded={findings.length} onClick={loadMoreFindings} total={findingTotal} />
+          <LoadedRecordsNote label="IOC records" loaded={iocs.length} total={iocTotal} />
+          <LoadMoreButton disabled={loadingMoreIocs} label="IOC records" loaded={iocs.length} onClick={loadMoreIocs} total={iocTotal} />
         </div>
       </ResultSection>
 
@@ -1028,7 +1244,9 @@ export function AnalysisJobStatusPage() {
               </Table>
             </div>
           )}
-          <PluginResultTable pluginResults={pluginResults} />
+          <PluginResultTable pluginResults={pluginResults} limit={pluginResults.length} />
+          <LoadedRecordsNote label="plugin results" loaded={pluginResults.length} total={pluginResultTotal} />
+          <LoadMoreButton disabled={loadingMorePluginResults} label="plugin results" loaded={pluginResults.length} onClick={loadMorePluginResults} total={pluginResultTotal} />
         </div>
       </ResultSection>
 
@@ -1060,7 +1278,11 @@ export function AnalysisJobStatusPage() {
         empty={memoryRegions.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "No memory-region artifacts are available for this job.")}
       >
-        <MemoryRegionTable caption={focusPid === null ? "Memory region artifacts" : `Memory region artifacts for PID ${focusPid}`} memoryRegions={memoryRegions} limit={50} />
+        <div className="page-stack compact-stack">
+          <MemoryRegionTable caption={focusPid === null ? "Memory region artifacts" : `Memory region artifacts for PID ${focusPid}`} memoryRegions={memoryRegions} limit={memoryRegions.length} />
+          <LoadedRecordsNote label="memory-region artifacts" loaded={memoryRegions.length} total={memoryRegionTotal} />
+          <LoadMoreButton disabled={loadingMoreArtifacts === "memory-regions"} label="memory-region artifacts" loaded={memoryRegions.length} onClick={loadMoreMemoryRegions} total={memoryRegionTotal} />
+        </div>
       </ResultSection>
 
       <ResultSection
@@ -1070,7 +1292,11 @@ export function AnalysisJobStatusPage() {
         empty={yaraMatches.length === 0}
         emptyMessage={terminalResultEmptyMessage(job.status, "No YARA match artifacts are available for this job. Check the YARA status message above before treating this as a clean no-match result.")}
       >
-        <YaraMatchTable caption={focusPid === null ? "YARA match artifacts" : `YARA match artifacts for PID ${focusPid}`} yaraMatches={yaraMatches} limit={50} />
+        <div className="page-stack compact-stack">
+          <YaraMatchTable caption={focusPid === null ? "YARA match artifacts" : `YARA match artifacts for PID ${focusPid}`} yaraMatches={yaraMatches} limit={yaraMatches.length} />
+          <LoadedRecordsNote label="YARA match artifacts" loaded={yaraMatches.length} total={yaraMatchTotal} />
+          <LoadMoreButton disabled={loadingMoreArtifacts === "yara-matches"} label="YARA matches" loaded={yaraMatches.length} onClick={loadMoreYaraMatches} total={yaraMatchTotal} />
+        </div>
       </ResultSection>
 
       <ResultSection
@@ -1080,15 +1306,33 @@ export function AnalysisJobStatusPage() {
         empty={focusPid !== null && focusedArtifactCount === 0}
         emptyMessage={`No normalized artifacts are available for PID ${focusPid}.`}
       >
-        <ArtifactDrilldown
-          commandArtifacts={commandArtifacts}
-          focusPid={focusPid}
-          memoryRegions={memoryRegions}
-          moduleArtifacts={moduleArtifacts}
-          networkArtifacts={networkArtifacts}
-          processArtifacts={processArtifacts}
-          yaraMatches={yaraMatches}
-        />
+        <div className="page-stack compact-stack">
+          <ArtifactDrilldown
+            commandArtifacts={commandArtifacts}
+            focusPid={focusPid}
+            memoryRegions={memoryRegions}
+            moduleArtifacts={moduleArtifacts}
+            networkArtifacts={networkArtifacts}
+            processArtifacts={processArtifacts}
+            yaraMatches={yaraMatches}
+          />
+          <div className="result-load-grid">
+            <div>
+              <LoadedRecordsNote label="process artifacts" loaded={processArtifacts.length} total={processArtifactTotal} />
+            </div>
+            <div>
+              <LoadedRecordsNote label="command artifacts" loaded={commandArtifacts.length} total={commandArtifactTotal} />
+            </div>
+            <div>
+              <LoadedRecordsNote label="network artifacts" loaded={networkArtifacts.length} total={networkArtifactTotal} />
+              <LoadMoreButton disabled={loadingMoreArtifacts === "network"} label="network artifacts" loaded={networkArtifacts.length} onClick={loadMoreNetworkArtifacts} total={networkArtifactTotal} />
+            </div>
+            <div>
+              <LoadedRecordsNote label="module artifacts" loaded={moduleArtifacts.length} total={moduleArtifactTotal} />
+              <LoadMoreButton disabled={loadingMoreArtifacts === "modules"} label="module artifacts" loaded={moduleArtifacts.length} onClick={loadMoreModuleArtifacts} total={moduleArtifactTotal} />
+            </div>
+          </div>
+        </div>
       </ResultSection>
 
       <ResultSection
@@ -1100,7 +1344,9 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no threat-oriented IOC records extracted.")}
       >
         <div className="page-stack compact-stack">
-          <IocTable caption="Threat-oriented IOC records for this analysis job" iocs={threatIocs} limit={100} />
+          <IocTable caption="Threat-oriented IOC records for this analysis job" iocs={threatIocs} limit={threatIocs.length} />
+          <LoadedRecordsNote label="IOC records" loaded={iocs.length} total={iocTotal} />
+          <LoadMoreButton disabled={loadingMoreIocs} label="IOC records" loaded={iocs.length} onClick={loadMoreIocs} total={iocTotal} />
           <p className="muted">Threat-oriented IOCs emphasize public endpoints, suspicious paths, and malware-specific YARA rules with correlation. Exports still include all stored IOC records.</p>
         </div>
       </ResultSection>
@@ -1113,7 +1359,9 @@ export function AnalysisJobStatusPage() {
         emptyMessage={terminalResultEmptyMessage(job.status, "RAMSight completed this analysis with no investigation artifact IOC records extracted.")}
       >
         <div className="page-stack compact-stack">
-          <IocTable caption="Contextual investigation artifacts" iocs={investigationArtifactIocs} limit={100} />
+          <IocTable caption="Contextual investigation artifacts" iocs={investigationArtifactIocs} limit={investigationArtifactIocs.length} />
+          <LoadedRecordsNote label="IOC records" loaded={iocs.length} total={iocTotal} />
+          <LoadMoreButton disabled={loadingMoreIocs} label="IOC records" loaded={iocs.length} onClick={loadMoreIocs} total={iocTotal} />
           <p className="muted">PIDs, plugin references, memory regions, and generic YARA hits are shown as investigation artifacts, not direct threat IOCs.</p>
         </div>
       </ResultSection>

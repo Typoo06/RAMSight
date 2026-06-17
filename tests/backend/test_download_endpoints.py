@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_db
 from app.main import app
-from app.models import AnalysisJob, Base, Case, Evidence, Report
+from app.models import AnalysisJob, Base, Case, Evidence, PluginResult, Report
 from app.storage.client import StorageObjectNotFoundError, StorageObjectStream, get_storage_client
 from app.storage.keys import ioc_export_key, report_object_key
 
@@ -123,6 +123,29 @@ def seed_report(session_factory, case: Case, evidence: Evidence, job: AnalysisJo
         db.close()
 
 
+def seed_plugin_result(session_factory, evidence: Evidence, job: AnalysisJob, bucket: str = "raw-outputs", key: str | None = None):
+    db = session_factory()
+    try:
+        plugin_result = PluginResult(
+            analysis_job_id=job.id,
+            evidence_id=evidence.id,
+            os_family="windows",
+            plugin_profile="windows_default",
+            plugin_name="windows.pslist",
+            source_plugin="windows.pslist",
+            status="completed",
+            raw_output_bucket=bucket,
+            raw_output_key=key or f"case-{job.case_id}/job-{job.id}/raw/windows_pslist.json",
+            parsed_record_count=2,
+        )
+        db.add(plugin_result)
+        db.commit()
+        db.refresh(plugin_result)
+        return plugin_result
+    finally:
+        db.close()
+
+
 def test_report_download_returns_404_for_missing_report(client_context) -> None:
     client, _, fake_storage = client_context
 
@@ -221,3 +244,41 @@ def test_ioc_export_download_rejects_unsupported_format(client_context) -> None:
     assert response.status_code == 400
     assert response.json()["detail"] == "unsupported IOC export format"
     assert fake_storage.requests == []
+
+def test_plugin_raw_output_download_streams_db_referenced_object(client_context) -> None:
+    client, session_factory, fake_storage = client_context
+    _, evidence, job = seed_analysis_job(session_factory)
+    plugin_result = seed_plugin_result(session_factory, evidence, job)
+    fake_storage.add_object("raw-outputs", plugin_result.raw_output_key, b'{"rows": []}', "application/json")
+
+    response = client.get(f"/api/v1/plugin-results/{plugin_result.id}/raw-output/download")
+
+    assert response.status_code == 200
+    assert response.content == b'{"rows": []}'
+    assert response.headers["content-disposition"] == 'attachment; filename="windows_pslist_raw_output.json"'
+    assert response.headers["content-type"].startswith("application/json")
+    assert fake_storage.requests == [("raw-outputs", plugin_result.raw_output_key)]
+
+
+def test_plugin_raw_output_download_rejects_invalid_bucket_before_object_access(client_context) -> None:
+    client, session_factory, fake_storage = client_context
+    _, evidence, job = seed_analysis_job(session_factory)
+    plugin_result = seed_plugin_result(session_factory, evidence, job, bucket="evidence")
+
+    response = client.get(f"/api/v1/plugin-results/{plugin_result.id}/raw-output/download")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "raw plugin output metadata is invalid"
+    assert fake_storage.requests == []
+
+
+def test_plugin_raw_output_download_returns_404_when_object_missing(client_context) -> None:
+    client, session_factory, fake_storage = client_context
+    _, evidence, job = seed_analysis_job(session_factory)
+    plugin_result = seed_plugin_result(session_factory, evidence, job)
+
+    response = client.get(f"/api/v1/plugin-results/{plugin_result.id}/raw-output/download")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Raw plugin output is not available for this plugin result."
+    assert fake_storage.requests == [("raw-outputs", plugin_result.raw_output_key)]

@@ -1,5 +1,6 @@
 import { Badge } from "../ui/Badge";
 import { Table } from "../ui/Table";
+import { pluginRawOutputDownloadUrl } from "../../api/pluginResults";
 import type { PluginResult } from "../../types/domain";
 import { displayValue, formatDateTime, formatDurationMs } from "../../utils/format";
 import { statusTone } from "../../utils/status";
@@ -24,6 +25,7 @@ export function PluginResultTable({ pluginResults, limit = 100 }: PluginResultTa
             <th>Duration</th>
             <th>Parsed rows</th>
             <th>Error summary</th>
+            <th>Raw output</th>
             <th>Raw output key</th>
             <th>Parsed output key</th>
           </tr>
@@ -45,6 +47,13 @@ export function PluginResultTable({ pluginResults, limit = 100 }: PluginResultTa
               <td>{formatDurationMs(pluginResult.duration_ms)}</td>
               <td>{pluginResult.parsed_record_count === null ? "Unknown" : pluginResult.parsed_record_count}</td>
               <td className="long-text error-summary">{displayValue(pluginResult.error_message)}</td>
+              <td>
+                {pluginResult.raw_output_key ? (
+                  <a className="button button-secondary button-small" href={pluginRawOutputDownloadUrl(pluginResult.id)}>Download raw JSON</a>
+                ) : (
+                  <span className="muted">Not available</span>
+                )}
+              </td>
               <td className="long-text"><code className="code-value">{displayValue(pluginResult.raw_output_key)}</code></td>
               <td className="long-text">
                 <code className="code-value">{displayValue(pluginResult.parsed_output_key)}</code>
